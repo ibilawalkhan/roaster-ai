@@ -1,26 +1,145 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+  Al Tazah Roster — "Charcoal & Ember"
+  Warm Mediterranean palette: charcoal (the cooking method) + ember/flame
+  accents on a warm paper ground. Built for a data-dense internal tool.
+*/
+
+@theme {
+  /* Surfaces */
+  --color-paper: #f4ede0;
+  --color-paper-deep: #ece2d1;
+  --color-surface: #fffdf8;
+  --color-surface-2: #faf5ea;
+
+  /* Ink + charcoal */
+  --color-ink: #241d16;
+  --color-ink-soft: #6f6353;
+  --color-ink-faint: #9c8e7b;
+  --color-charcoal: #211c17;
+  --color-charcoal-2: #2c251d;
+  --color-charcoal-3: #3a3127;
+
+  /* Ember (primary) */
+  --color-ember: #d75321;
+  --color-ember-deep: #b8400f;
+  --color-ember-soft: #f6dccb;
+  --color-ember-glow: #ee7a3c;
+
+  /* Supporting */
+  --color-herb: #5c6b34;
+  --color-herb-soft: #e2e6cf;
+  --color-saffron: #e0a020;
+  --color-saffron-soft: #f6e6c2;
+  --color-clay: #a8492c;
+
+  /* Lines */
+  --color-line: #e2d7c3;
+  --color-line-strong: #d2c4ab;
+
+  /* Fonts */
+  --font-display: var(--font-display), Georgia, serif;
+  --font-sans: var(--font-sans), system-ui, sans-serif;
+
+  /* Radii */
+  --radius-card: 14px;
+
+  /* Shadows */
+  --shadow-soft: 0 1px 2px rgba(36, 29, 22, 0.04),
+    0 8px 24px -12px rgba(36, 29, 22, 0.18);
+  --shadow-pop: 0 4px 12px rgba(36, 29, 22, 0.1),
+    0 24px 48px -20px rgba(36, 29, 22, 0.32);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: light;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  /* Subtle paper grain via layered radial dots */
+  background-image: radial-gradient(
+    rgba(36, 29, 22, 0.022) 1px,
+    transparent 1px
+  );
+  background-size: 4px 4px;
+}
+
+::selection {
+  background-color: var(--color-ember);
+  color: #fff;
+}
+
+/* Tabular figures for all numeric data (hours, pay, costs) */
+.nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Thin, warm scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+*::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--color-line-strong);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+/* Staggered entrance used on page load */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.rise {
+  animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.pop-in {
+  animation: pop-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.overlay-in {
+  animation: overlay-in 0.2s ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .pop-in,
+  .overlay-in {
+    animation: none;
+  }
 }
