@@ -284,3 +284,9 @@ The `tenant isolation` test (`tests/db/tenant-isolation.test.ts`, run by `npm ru
 
 ### AD-5 — Test runner: Vitest; isolation/RLS tested at the DB layer
 Vitest for speed and native ESM/TS. Business logic lives in `src/lib/` to stay testable without the UI (CLAUDE.md code style). Migrations are forward-only, filename-ordered (`0001_…`, `0002_…`), and never edited once applied (§9).
+
+### AD-6 — Client-side auth (browser Supabase client), RLS as the boundary
+The app is fully client-rendered (`"use client"` throughout, session gated in client layouts). So auth uses the Supabase **browser** client (`src/lib/supabase/client.ts`) with session persisted to localStorage and auto-refreshed — no SSR cookies/middleware (which also avoids the Next 16 middleware/cookie changes). This is safe because security is enforced by **RLS in Postgres**, not by the session transport: the anon key is public by design and grants only what policies allow. Moving rendering server-side (httpOnly cookie auth via `@supabase/ssr`) is a later hardening step, not a rewrite.
+
+### AD-7 — User↔staff match via a SECURITY DEFINER RPC
+Managers pre-create staff (`app_user`) with a phone and NULL `auth_user_id`. RLS forbids an authenticated user from writing a row that isn't yet theirs, so first-login linking runs through `public.link_current_user()` (`supabase/migrations/0003_auth_link.sql`): it matches the caller's **verified** `auth.users.phone` to an unclaimed, active staff record and claims it. Idempotent, refuses unknown phones, and never crosses tenants. Phones are stored as E.164 digits without "+" to match Supabase's `auth.users.phone`.

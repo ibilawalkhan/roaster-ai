@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -38,15 +38,16 @@ export interface TestDb {
 }
 
 function migrationSql(): string[] {
-  // Applied in filename order — the same order Supabase applies them.
-  return ["0001_init.sql", "0002_rls.sql"].map((f) =>
-    readFileSync(join(migrationsDir, f), "utf8"),
-  );
+  // Every .sql migration, in filename order — the same order Supabase applies.
+  return readdirSync(migrationsDir)
+    .filter((f) => f.endsWith(".sql"))
+    .sort()
+    .map((f) => readFileSync(join(migrationsDir, f), "utf8"));
 }
 
 /**
  * Boot an in-process Postgres, provision the Supabase auth surface, apply the
- * real migrations, and seed two isolated tenants (Al Tazah + Guildford).
+ * real migrations, and seed two isolated tenants.
  */
 export async function setupTestDb(): Promise<TestDb> {
   const db = new PGlite();
