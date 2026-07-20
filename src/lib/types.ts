@@ -9,8 +9,12 @@ export const ROLES = [
 ] as const;
 export type Role = (typeof ROLES)[number];
 
+// Default location names for the first tenant (Al Tazah). Locations are now
+// tenant data in the DB; `LocationName` is a plain string so any business's
+// location names are valid. Making the dropdowns fully dynamic per-tenant is a
+// follow-up.
 export const LOCATIONS = ["Regents Park", "Wollongong"] as const;
-export type LocationName = (typeof LOCATIONS)[number];
+export type LocationName = string;
 
 export const EMPLOYMENT_TYPES = ["casual", "part-time", "full-time"] as const;
 export type EmploymentType = (typeof EMPLOYMENT_TYPES)[number];

@@ -45,6 +45,9 @@ enable_signup = true
 enable_confirmations = false
 # Local dev: OTPs are printed to the Supabase logs / Inbucket, no real SMS sent.
 [auth.sms.test_otp]
-# Deterministic OTPs for local test phone numbers.
+# Deterministic OTPs for local seeded phone numbers (no real SMS sent).
 "61400000001" = "000000"
 "61400000002" = "000000"
+"61400000003" = "000000"
+"61400000004" = "000000"
+"61400000005" = "000000"

@@ -6,30 +6,25 @@ import { useEffect, type ReactNode } from "react";
 import { useStore } from "@/lib/store";
 import { Avatar } from "@/components/ui";
 import { IconCalendar, IconFlame, IconLogout, IconUser } from "@/components/icons";
-import { activeEmployees, employeeById } from "@/lib/selectors";
+import { employeeById } from "@/lib/selectors";
 
 export default function EmployeeLayout({ children }: { children: ReactNode }) {
-  const { session, hydrated, data, logout, setCurrentEmployee } = useStore();
+  const { session, hydrated, data, logout } = useStore();
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
     if (!hydrated) return;
-    if (session.role !== "employee") {
-      router.replace("/");
-    } else if (!session.employeeId) {
-      const first = activeEmployees(data)[0]?.id;
-      if (first) setCurrentEmployee(first);
-    }
-  }, [hydrated, session.role, session.employeeId, data, router, setCurrentEmployee]);
+    if (session.role !== "employee") router.replace("/");
+  }, [hydrated, session.role, router]);
 
   if (!hydrated || session.role !== "employee") {
     return <div className="min-h-screen bg-paper" />;
   }
 
   const me = employeeById(data, session.employeeId);
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     router.push("/");
   };
 
@@ -48,24 +43,9 @@ export default function EmployeeLayout({ children }: { children: ReactNode }) {
           </span>
           <span className="font-display font-semibold">Al Tazah</span>
         </div>
-        <div className="flex items-center gap-2">
-          {/* Demo: switch which team member you're viewing */}
-          <select
-            value={session.employeeId ?? ""}
-            onChange={(e) => setCurrentEmployee(e.target.value)}
-            className="max-w-[140px] rounded-lg border border-white/15 bg-white/10 px-2 py-1.5 text-[13px] text-paper outline-none"
-            aria-label="View as"
-          >
-            {activeEmployees(data).map((e) => (
-              <option key={e.id} value={e.id} className="text-ink">
-                {e.name}
-              </option>
-            ))}
-          </select>
-          <button onClick={handleLogout} className="text-paper/60" aria-label="Sign out">
-            <IconLogout width={20} height={20} />
-          </button>
-        </div>
+        <button onClick={handleLogout} className="text-paper/60" aria-label="Sign out">
+          <IconLogout width={20} height={20} />
+        </button>
       </header>
 
       {/* Greeting strip */}

@@ -28,6 +28,7 @@ export type Database = {
           name: string
           pay_rate: number
           phone: string | null
+          position: string | null
           role: Database["public"]["Enums"]["app_role"]
         }
         Insert: {
@@ -43,6 +44,7 @@ export type Database = {
           name: string
           pay_rate?: number
           phone?: string | null
+          position?: string | null
           role?: Database["public"]["Enums"]["app_role"]
         }
         Update: {
@@ -58,6 +60,7 @@ export type Database = {
           name?: string
           pay_rate?: number
           phone?: string | null
+          position?: string | null
           role?: Database["public"]["Enums"]["app_role"]
         }
         Relationships: [
@@ -399,6 +402,10 @@ export type Database = {
         Returns: Database["public"]["Enums"]["app_role"]
       }
       is_manager: { Args: never; Returns: boolean }
+      link_current_user: {
+        Args: Record<PropertyKey, never>
+        Returns: Database["public"]["Tables"]["app_user"]["Row"]
+      }
     }
     Enums: {
       app_role: "manager" | "staff"
