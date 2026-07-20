@@ -1,81 +1,67 @@
-@AGENTS.md
+# CLAUDE.md — Rosterly Project Guide
 
-# Al Tazah · Roster
+Context and rules for Claude Code in this repository. The full spec — platform model, features, data model, delivery plan — lives in **REQUIREMENTS.md**. Read it before implementing anything non-trivial. When spec and code disagree, the spec wins; if the spec is wrong, update it in the same PR.
 
-Staff scheduling + pay-tracking MVP for **Al Tazah Charcoal Chicken** (Regents Park & Wollongong). Replaces a spreadsheet-and-WhatsApp workflow: managers build a 2-week roster on a grid; staff view their shifts on a phone. Built as a **front-end prototype for the owner pitch** — no backend.
+## What this is
+
+Rosterly is a **multi-tenant SaaS** for restaurant shift scheduling, shift-swapping, and labour-cost estimates. Many restaurants share one codebase and one database, each fully isolated. It has real paying customers (Al Tazah; a Guildford restaurant) — this is production software people depend on, not a prototype. Correctness and not-breaking-in-production outrank feature count and speed.
+
+## Owner context
+
+- Solo developer, 2-week deadline to first real launch
+- Existing codebase is a Next.js front-end prototype using a localStorage store behind `src/lib/store.tsx`; the core task is replacing that store with Supabase behind the same interface — NOT rewriting the UI
+- Every choice must be interview-defensible; when you make an architectural decision, note it briefly in REQUIREMENTS.md
+
+## Tech stack (fixed — do not substitute)
+
+- **Frontend:** existing Next.js (App Router) + React + TypeScript + Tailwind. Reuse it. Do not rewrite the UI or restyle.
+- **Backend:** **Supabase** — Postgres + Auth (phone OTP) + Realtime + Row-Level Security + Edge Functions + cron. No separate API server.
+- **Notifications:** in-app via Supabase Realtime; out-of-app via a Supabase Edge Function calling **Twilio** (SMS), behind one `notify()` module.
+- **Validation:** **Zod** on the client; Postgres constraints/checks as the backstop.
+- **Monitoring:** **Sentry** wired from the first deploy.
+- **Hosting:** Vercel (frontend) + Supabase (managed). Push-to-main deploys.
+
+## THE non-negotiable rules
+
+1. **Tenant isolation is sacred.** Every table has `business_id`. Every query and every RLS policy filters by it. There is an automated test (`tenant isolation`) that logs in as business A and asserts it cannot read business B's rows or any other user's wage — this test must exist and pass. Never write a query that could cross tenants. RLS in the database is the real boundary; hiding UI is NOT security.
+2. **Server-side authorization on every mutation.** Never trust the client. The DB (RLS + policies) is the final gate.
+3. **The shift-swap approval is a critical section.** Approving a claim runs in ONE transaction that re-checks the shift is still `OPEN`/`CLAIMED_PENDING`, reassigns it, and rejects other claims. Concurrent approvals: exactly one wins. There is a concurrency test for this. Implement the state machine in REQUIREMENTS.md §5.3 exactly — including every edge case (no-claim-before-start stays with dropper and alerts manager; withdraw only before approval; direct assign).
+4. **Never silently lose a shift.** A shift is always owned by someone or explicitly flagged to the manager. No path leaves it ownerless without a notification.
+5. **Costs are ESTIMATES, never payroll.** `hours = end − start − break; cost = hours × pay_rate`, computed in selectors, never stored as truth. The estimate disclaimer (REQUIREMENTS.md §0) renders on every screen showing a dollar figure. Do not add award/penalty-rate logic — it is deliberately out of scope for legal reasons.
+6. **Every screen has loading and error states.** A failed write shows a retry, never a blank/frozen page or silent loss. Optimistic UI must roll back visibly on failure.
+7. **Notifications are best-effort and logged.** A failed SMS/realtime push writes a `notification` row with `delivery_status` and never crashes the action that triggered it.
+8. **Timezones:** store UTC, render Australia/Sydney. Test around a DST change.
+9. **Migrations forward-only, tested on staging** before production. Never edit an applied migration. Never develop against the customer's live data — use the staging Supabase project.
+10. **Scope discipline.** Only build what's tagged **[MVP]** in REQUIREMENTS.md for the 2-week launch. [V1.1]/[LATER] items are notes, not code. If behind, follow the §11 cut-list. Never cut: auth/RLS + isolation test, the disclaimer, the swap approve step, error states, Sentry, backups.
+
+## Data model
+
+Exactly REQUIREMENTS.md §10. All key/tenant logic lives in one data-access layer (extend the existing `src/lib/store.tsx` interface); no raw `business_id` string-building scattered through components. Index the hot paths listed in §8 from the first migration.
 
 ## Commands
 
 ```bash
-npm run dev      # dev server at http://localhost:3000
-npm run build    # production build (also runs tsc + lint)
-npm start        # serve the production build
-npm run lint     # eslint
-npx tsc --noEmit # typecheck only
-node scripts/verify.mjs   # Playwright smoke test (dev server must be running)
+npm run dev            # Next.js dev
+npm run lint
+npm run typecheck
+npm run test           # includes the tenant-isolation + swap-concurrency tests
+supabase db diff / supabase migration new   # schema changes (versioned)
 ```
 
-## Stack
+Run lint + typecheck + test before declaring any task done.
 
-- **Next.js 16** (App Router, Turbopack) + **React 19** + **TypeScript** + **Tailwind CSS v4**
-- All pages are **client components** (`"use client"`) — the app is interactive and state lives in the browser.
-- No database: seeded demo data + `localStorage`. Persisted under key `altazah-roster-v1`.
+## Code style
 
-## Architecture
+- TypeScript strict; no `any` without an inline justification
+- Thin components; data access and business logic in `src/lib/` so they're testable without the UI
+- Australian English in user-facing strings (roster, organise, colour)
+- Conventional commits (`feat:`, `fix:`, `infra:`, `test:`, `chore:`); small reviewable commits
 
-State flows through a single store: `src/lib/store.tsx` (React Context + `useReducer`, wrapped around the app in `src/app/layout.tsx`). Access it with `useStore()`.
+## Definition of done (any task)
 
-- On mount the provider loads from `localStorage`; if empty it falls back to `buildSeed()`. Every change re-persists.
-- `hydrated` is `false` during SSR / first paint. **Layouts and the landing page gate on `hydrated`** (render a splash/empty shell until true) — this is deliberate and avoids hydration mismatches from `localStorage` and `Math.random()` ids. Don't render store-dependent UI before `hydrated`.
-- `session` holds the demo "login": `{ role: 'admin' | 'employee' | null, employeeId }`. Picking a role on `/` calls `login(...)` and routes to `/admin` or `/me`. The admin/employee layouts redirect to `/` if the role doesn't match.
-
-Data is **derived, not stored**: hours and costs are always computed from shifts via helpers in `src/lib/selectors.ts` and `src/lib/utils.ts`. There are no precomputed totals to keep in sync.
-
-## Directory map
-
-```
-src/
-  app/
-    layout.tsx            root: fonts + StoreProvider
-    page.tsx              role landing (charcoal/ember hero)
-    admin/
-      layout.tsx          manager shell (sidebar + mobile nav, role guard)
-      page.tsx            dashboard home
-      schedule/page.tsx   THE grid builder (centerpiece)
-      employees/page.tsx  team list (add/edit/deactivate)
-      costs/page.tsx      labour cost breakdown
-    me/
-      layout.tsx          employee shell (mobile frame, role guard, "view as" switcher)
-      page.tsx            my schedule (next shift + upcoming)
-      profile/page.tsx    pay rate + contact (read-only)
-  components/
-    ui.tsx                primitives: Button, Card, Badge, Avatar, StatCard, Modal, form fields
-    icons.tsx             inline stroke SVG icon set
-    ShiftModal.tsx        add/edit/remove a shift
-    EmployeeModal.tsx     add/edit a team member
-  lib/
-    types.ts              Employee, Shift, Schedule + ROLES/LOCATIONS/EMPLOYMENT_TYPES consts
-    utils.ts              dates, time formatting, money/hours, shiftHours/shiftCost, ACCENTS palette
-    seed.ts               buildSeed(): 10 staff + a fortnight of shifts, relative to the current Monday
-    store.tsx             Context store + actions + localStorage
-    selectors.ts          derived data: weekDays, dayTotals, rangeTotals, employeeSummaries, etc.
-```
-
-## Conventions & gotchas
-
-- **Read the bundled Next.js 16 docs** (`node_modules/next/dist/docs/`) before using unfamiliar APIs — this version post-dates training data (see `AGENTS.md`).
-- **Design system = "Charcoal & Ember"**, defined as Tailwind v4 `@theme` tokens in `src/app/globals.css`. Use the semantic utilities (`bg-paper`, `text-ink`, `text-ink-soft`, `bg-ember`, `bg-charcoal`, `border-line`, `rounded-card`, `shadow-soft/pop`) rather than raw hex. Per-person colour comes from the `ACCENTS` palette in `utils.ts`, keyed by `employee.accent`; resolve with `accentOf(token)` (returns inline-style hex, used via `style=` because the tokens are dynamic).
-- **Fonts:** Fraunces (`font-display`) for headings/brand, Hanken Grotesk (`font-sans`) for UI. Numeric data uses the `.nums` class (tabular figures). No Inter/Geist.
-- **Dates are ISO `yyyy-mm-dd` strings**, parsed with `parseISO`/`addDays` from `utils.ts` — **never `new Date(iso)`** directly (timezone shifts). Weeks start **Monday** (`mondayOf`).
-- **`weekDays`, `fortnightDays`, and all totals live in `selectors.ts`**, not `utils.ts` — a common import mix-up.
-- **One shift per employee per day** is assumed (`shiftFor` returns the first match; the grid is one cell per day). Keep this invariant if extending.
-- `shiftHours` = gross span − `breakMinutes`; cost = hours × `hourlyRate`. The shift modal shows live paid-hours.
-- Store actions create ids/timestamps for you — call `addShift({...})` / `addEmployee({...})` with the payload minus `id`/`createdAt`.
-
-## Verifying changes
-
-Run `node scripts/verify.mjs` with the dev server up: it drives every flow with Playwright, screenshots to `/tmp/altazah-shots/`, and **fails on any page or console error**. Good for catching regressions before a demo.
-
-## Future / out of scope
-
-This is a pitch MVP. Real auth, WhatsApp/SMS notifications, clock-in/out, leave & shift-swap requests, and penalty-rate awards are intentionally deferred. The data layer is isolated behind `store.tsx` so a swap to **Supabase** (the planned backend) is a contained change. See `../altazah-scheduler-spec.md` for the full requirements.
+- [ ] lint + typecheck + tests pass
+- [ ] tenant-isolation invariant not weakened (and its test still passes)
+- [ ] any cost/pay figure carries the disclaimer
+- [ ] loading + error states present for any new screen or async action
+- [ ] REQUIREMENTS.md updated if data model, features, or architecture changed
+- [ ] no TODOs without a linked issue
