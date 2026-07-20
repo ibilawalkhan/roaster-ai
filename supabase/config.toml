@@ -1,0 +1,50 @@
+# Supabase local config. `project_id` is the local stack identifier only;
+# staging/production are linked separately via `supabase link`.
+project_id = "rosterly"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[db.pooler]
+enabled = true
+default_pool_size = 20
+max_client_conn = 100
+
+[studio]
+enabled = true
+port = 54323
+
+[inbucket]
+enabled = true
+port = 54324
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+# Phone OTP is the primary staff login (REQUIREMENTS.md §4).
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false
+
+[auth.sms]
+enable_signup = true
+enable_confirmations = false
+# Local dev: OTPs are printed to the Supabase logs / Inbucket, no real SMS sent.
+[auth.sms.test_otp]
+# Deterministic OTPs for local test phone numbers.
+"61400000001" = "000000"
+"61400000002" = "000000"

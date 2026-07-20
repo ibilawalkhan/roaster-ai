@@ -263,3 +263,24 @@ notification      (id, business_id, user_id, type, payload_json,
 
 ## 13. Out of scope for v1 (tell the owner)
 Award/penalty-rate pay, payroll/payslips, clock-in/out time tracking, POS/accounting integrations, native apps, self-serve signup, automated billing, leave management. Some are V1.1/LATER; **award pay is never in scope** (§0).
+
+---
+
+## 14. Architecture decisions (build log)
+
+Brief, interview-defensible notes on decisions made during the build. Newest first.
+
+### AD-1 — Tenant isolation enforced by RLS + SECURITY DEFINER context helpers
+Every table has `business_id` with RLS enabled (`supabase/migrations/0002_rls.sql`). Policies resolve the caller's tenant via `public.current_business_id()` / `current_app_user_id()` / `is_manager()`, each `SECURITY DEFINER` so they read `app_user` **without** re-triggering RLS — this avoids the classic self-referential-policy infinite recursion. **Wage privacy** is enforced structurally: staff can `SELECT` only their own `app_user` row (RLS is row-level, so hiding one column isn't possible; restricting to the own row hides colleagues' rates entirely). A `BEFORE UPDATE` guard trigger (`guard_app_user_update`) blocks non-managers from changing `pay_rate`/`role`/`active`/`business_id` — server-side authz beyond RLS (rule 2).
+
+### AD-2 — RLS tested against real Postgres via PGlite, no Docker required
+The `tenant isolation` test (`tests/db/tenant-isolation.test.ts`, run by `npm run test`) boots **PGlite** (Postgres compiled to WASM, in-process), provisions the `auth` surface Supabase gives for free (`tests/db/auth-shim.sql`), applies the **unmodified** migration files, seeds two tenants (Al Tazah + Guildford), and asserts cross-tenant reads/writes and wage reads fail at the DB. Chosen over a Docker-based Supabase stack so the invariant test is fast, deterministic, and CI-friendly with zero external services; the same migrations apply identically to real Supabase (staging/prod).
+
+### AD-3 — Timezone model: instants in UTC, shift times as local wall-clock
+`created_at`/`updated_at`/notification times are `timestamptz` (UTC). Shift `date`/`start_time`/`end_time` are stored as the roster's **local calendar values** and attached to Australia/Sydney only at render — so a 10:00 shift stays 10:00 across a DST change (correct for a roster). Satisfies §9's "store UTC, render Sydney" for instants while keeping wall-clock shift semantics.
+
+### AD-4 — Controlled vocabularies as Postgres enums
+`subscription_status`, `app_role`, `employment_type`, `roster_status`, `shift_status` (the §5.3 state machine), `claim_outcome`, `notification_channel` are enums — a DB-level backstop to Zod (§9). Job roles (Kitchen/FOH/…) stay free text on `shift.role` since they vary per business.
+
+### AD-5 — Test runner: Vitest; isolation/RLS tested at the DB layer
+Vitest for speed and native ESM/TS. Business logic lives in `src/lib/` to stay testable without the UI (CLAUDE.md code style). Migrations are forward-only, filename-ordered (`0001_…`, `0002_…`), and never edited once applied (§9).
