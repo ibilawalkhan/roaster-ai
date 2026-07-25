@@ -135,6 +135,23 @@ describe("manager positive controls", () => {
   });
 });
 
+describe("user_role visibility (M2 multi-role)", () => {
+  it("manager A sees all role assignments in their business, none from B", async () => {
+    const { rows } = await t.asUser(t.fx.authManagerA, (db) =>
+      db.query<{ business_id: string }>("select business_id from public.user_role"),
+    );
+    expect(rows).toHaveLength(3); // managerA + staffA1 + staffA2
+    expect(rows.every((r) => r.business_id === t.fx.businessA)).toBe(true);
+  });
+
+  it("staff A1 sees only their own role assignments", async () => {
+    const { rows } = await t.asUser(t.fx.authStaffA1, (db) =>
+      db.query<{ user_id: string }>("select user_id from public.user_role"),
+    );
+    expect(rows.every((r) => r.user_id === t.fx.staffA1)).toBe(true);
+  });
+});
+
 describe("unauthenticated access", () => {
   it("a request with an unknown JWT sub sees no rows (§6 #15)", async () => {
     const { rows } = await t.asUser("00000000-0000-0000-0000-000000000000", (db) =>

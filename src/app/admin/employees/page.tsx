@@ -2,31 +2,42 @@
 
 import { useMemo, useState } from "react";
 import { useStore } from "@/lib/store";
-import { EmployeeModal } from "@/components/EmployeeModal";
+import { TeamMemberModal } from "@/components/TeamMemberModal";
 import { Avatar, Badge, Button, Card } from "@/components/ui";
-import { IconEdit, IconMail, IconPhone, IconPlus } from "@/components/icons";
-import { LOCATIONS, type Employee, type LocationName } from "@/lib/types";
-import { hoursInRange } from "@/lib/selectors";
-import { formatHours, formatMoney } from "@/lib/utils";
+import { IconEdit, IconMail, IconPhone, IconPlus, IconUsers } from "@/components/icons";
+import {
+  INVITE_LABEL,
+  LEVEL_LABEL,
+  EMPLOYMENT_LABEL,
+  type Level,
+  type TeamMember,
+} from "@/lib/types";
+import { formatMoney } from "@/lib/utils";
 
-export default function EmployeesPage() {
-  const { data, setEmployeeActive } = useStore();
-  const schedule = data.schedules[0];
+export default function TeamPage() {
+  const { team, roles, locations, setMemberActive, inviteMember } = useStore();
 
-  const [filter, setFilter] = useState<LocationName | "All">("All");
+  const [levelFilter, setLevelFilter] = useState<Level | "all">("all");
   const [showInactive, setShowInactive] = useState(false);
-  const [modal, setModal] = useState<{ employee?: Employee } | null>(null);
+  const [modal, setModal] = useState<{ member?: TeamMember } | null>(null);
+
+  const roleName = (id: string | null) => roles.find((r) => r.id === id)?.name ?? "—";
+  const locationName = (id: string | null) => locations.find((l) => l.id === id)?.name ?? "—";
 
   const list = useMemo(
     () =>
-      data.employees
-        .filter((e) => (showInactive ? true : e.isActive))
-        .filter((e) => filter === "All" || e.location === filter)
-        .sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.name.localeCompare(b.name)),
-    [data.employees, filter, showInactive]
+      team
+        .filter((m) => (showInactive ? true : m.active))
+        .filter((m) => levelFilter === "all" || m.level === levelFilter)
+        .sort(
+          (a, b) =>
+            Number(b.active) - Number(a.active) || a.name.localeCompare(b.name),
+        ),
+    [team, levelFilter, showInactive],
   );
 
-  const activeCount = data.employees.filter((e) => e.isActive).length;
+  const activeCount = team.filter((m) => m.active).length;
+  const seniorCount = team.filter((m) => m.active && m.level === "senior").length;
 
   return (
     <div className="mx-auto max-w-6xl px-5 py-7 sm:px-8">
@@ -34,7 +45,7 @@ export default function EmployeesPage() {
         <div>
           <h1 className="font-display text-3xl font-semibold tracking-tight text-ink">Team</h1>
           <p className="mt-1 text-sm text-ink-soft">
-            {activeCount} active across {LOCATIONS.length} locations
+            {activeCount} active · {seniorCount} senior{seniorCount === 1 ? "" : "s"}
           </p>
         </div>
         <Button onClick={() => setModal({})}>
@@ -42,17 +53,24 @@ export default function EmployeesPage() {
         </Button>
       </header>
 
+      {seniorCount === 0 && activeCount > 0 && (
+        <div className="rise mt-4 rounded-xl border border-saffron/40 bg-saffron-soft/50 px-4 py-2.5 text-[13px] text-[#8a6212]">
+          No active Senior on the team — rosters that require senior coverage won&rsquo;t generate.
+        </div>
+      )}
+
+      {/* Filters */}
       <div className="rise mt-5 flex flex-wrap items-center gap-2" style={{ animationDelay: "60ms" }}>
         <div className="inline-flex rounded-[11px] border border-line bg-surface p-1 shadow-soft">
-          {(["All", ...LOCATIONS] as const).map((o) => (
+          {(["all", "junior", "mid", "senior"] as const).map((o) => (
             <button
               key={o}
-              onClick={() => setFilter(o)}
-              className={`rounded-lg px-3 py-1.5 text-[13px] font-medium transition ${
-                filter === o ? "bg-charcoal text-paper" : "text-ink-soft hover:text-ink"
+              onClick={() => setLevelFilter(o)}
+              className={`rounded-lg px-3 py-1.5 text-[13px] font-medium capitalize transition ${
+                levelFilter === o ? "bg-charcoal text-paper" : "text-ink-soft hover:text-ink"
               }`}
             >
-              {o === "All" ? "All stores" : o}
+              {o === "all" ? "All levels" : o}
             </button>
           ))}
         </div>
@@ -67,83 +85,97 @@ export default function EmployeesPage() {
         </label>
       </div>
 
+      {/* Cards */}
       <div className="rise mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3" style={{ animationDelay: "100ms" }}>
-        {list.map((emp) => {
-          const hours = hoursInRange(data, emp.id, schedule.startDate, schedule.endDate);
-          const cost = hours * emp.hourlyRate;
-          return (
-            <Card
-              key={emp.id}
-              className={`p-5 transition ${emp.isActive ? "" : "opacity-60"}`}
-            >
-              <div className="flex items-start gap-3">
-                <Avatar name={emp.name} accent={emp.accent} size={48} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-display text-lg font-semibold leading-tight text-ink">
-                    {emp.name}
-                  </p>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                    <Badge tone="neutral">{emp.role}</Badge>
-                    <span className="text-[12px] capitalize text-ink-faint">
-                      {emp.employmentType}
-                    </span>
-                  </div>
+        {list.map((m) => (
+          <Card key={m.id} className={`p-5 transition ${m.active ? "" : "opacity-60"}`}>
+            <div className="flex items-start gap-3">
+              <Avatar name={m.name} accent={m.colour} size={48} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-display text-lg font-semibold leading-tight text-ink">
+                  {m.name}
+                </p>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <Badge tone="neutral">{roleName(m.primaryRoleId)}</Badge>
+                  <Badge tone={m.level === "senior" ? "ember" : m.level === "mid" ? "herb" : "muted"}>
+                    {LEVEL_LABEL[m.level]}
+                  </Badge>
+                  {m.isManager && <Badge tone="saffron">Manager</Badge>}
                 </div>
-                <button
-                  onClick={() => setModal({ employee: emp })}
-                  className="grid h-8 w-8 place-items-center rounded-lg text-ink-faint transition hover:bg-paper-deep hover:text-ink"
-                  aria-label="Edit"
-                >
-                  <IconEdit width={17} height={17} />
-                </button>
               </div>
+              <button
+                onClick={() => setModal({ member: m })}
+                className="grid h-8 w-8 place-items-center rounded-lg text-ink-faint transition hover:bg-paper-deep hover:text-ink"
+                aria-label="Edit"
+              >
+                <IconEdit width={17} height={17} />
+              </button>
+            </div>
 
-              <div className="mt-4 grid grid-cols-3 gap-2 rounded-xl bg-surface-2 p-3 text-center">
-                <Metric label="Rate" value={`$${emp.hourlyRate}`} />
-                <Metric label="Fortnight" value={formatHours(hours)} />
-                <Metric label="Est. pay" value={formatMoney(cost)} />
-              </div>
+            <div className="mt-4 grid grid-cols-3 gap-2 rounded-xl bg-surface-2 p-3 text-center">
+              <Metric label="Rate" value={`${formatMoney(m.payRate)}`} />
+              <Metric label="Type" value={EMPLOYMENT_LABEL[m.employmentType]} />
+              <Metric label="Roles" value={String(m.roleIds.length)} />
+            </div>
 
-              <div className="mt-3 space-y-1 text-[13px] text-ink-soft">
-                <p className="flex items-center gap-2">
-                  <IconPhone width={14} height={14} className="text-ink-faint" />
-                  {emp.phone || "—"}
-                </p>
-                <p className="flex items-center gap-2 truncate">
-                  <IconMail width={14} height={14} className="text-ink-faint" />
-                  <span className="truncate">{emp.email || "—"}</span>
-                </p>
-              </div>
+            <div className="mt-3 space-y-1 text-[13px] text-ink-soft">
+              <p className="flex items-center gap-2">
+                <IconPhone width={14} height={14} className="text-ink-faint" />
+                {m.phone || "—"}
+              </p>
+              <p className="flex items-center gap-2 truncate">
+                <IconMail width={14} height={14} className="text-ink-faint" />
+                <span className="truncate">{m.email || "—"}</span>
+              </p>
+            </div>
 
-              <div className="mt-4 flex items-center justify-between border-t border-line pt-3">
-                <span className="text-[12px] font-medium text-ink-faint">{emp.location}</span>
-                {emp.isActive ? (
+            <div className="mt-4 flex items-center justify-between border-t border-line pt-3">
+              <span className="flex items-center gap-2 text-[12px] font-medium text-ink-faint">
+                {locationName(m.homeLocationId)}
+                <span className="text-line-strong">·</span>
+                <span className={m.inviteStatus === "active" ? "text-herb" : ""}>
+                  {INVITE_LABEL[m.inviteStatus]}
+                </span>
+              </span>
+              <div className="flex items-center gap-3">
+                {m.active && m.inviteStatus === "not_invited" && (
                   <button
-                    onClick={() => setEmployeeActive(emp.id, false)}
+                    onClick={() => inviteMember(m.id)}
+                    className="text-[13px] font-medium text-ember hover:underline"
+                  >
+                    Invite
+                  </button>
+                )}
+                {m.active ? (
+                  <button
+                    onClick={() => setMemberActive(m.id, false)}
                     className="text-[13px] font-medium text-clay hover:underline"
                   >
                     Deactivate
                   </button>
                 ) : (
                   <button
-                    onClick={() => setEmployeeActive(emp.id, true)}
+                    onClick={() => setMemberActive(m.id, true)}
                     className="text-[13px] font-medium text-herb hover:underline"
                   >
                     Reactivate
                   </button>
                 )}
               </div>
-            </Card>
-          );
-        })}
+            </div>
+          </Card>
+        ))}
       </div>
 
       {list.length === 0 && (
-        <p className="mt-10 text-center text-sm text-ink-faint">No team members to show.</p>
+        <div className="mt-10 flex flex-col items-center gap-3 text-center">
+          <IconUsers width={32} height={32} className="text-ink-faint" />
+          <p className="text-sm text-ink-faint">No team members yet. Add your first one to get started.</p>
+        </div>
       )}
 
       {modal && (
-        <EmployeeModal open onClose={() => setModal(null)} employee={modal.employee} />
+        <TeamMemberModal open onClose={() => setModal(null)} member={modal.member} />
       )}
     </div>
   );
@@ -152,7 +184,7 @@ export default function EmployeesPage() {
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="nums text-sm font-bold text-ink">{value}</p>
+      <p className="nums truncate text-sm font-bold text-ink">{value}</p>
       <p className="text-[11px] uppercase tracking-wide text-ink-faint">{label}</p>
     </div>
   );

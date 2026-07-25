@@ -21,7 +21,7 @@ const NAV = [
 ];
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
-  const { session, hydrated, logout } = useStore();
+  const { session, hydrated, logout, business } = useStore();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -47,7 +47,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             <IconFlame width={20} height={20} />
           </span>
           <div className="leading-tight">
-            <p className="font-display text-base font-semibold">Al Tazah</p>
+            <p className="font-display text-base font-semibold">{business?.name ?? "Rosterly"}</p>
             <p className="text-[11px] uppercase tracking-wider text-paper/45">
               Manager
             </p>
@@ -95,7 +95,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             <span className="grid h-8 w-8 place-items-center rounded-lg bg-ember text-white">
               <IconFlame width={18} height={18} />
             </span>
-            <span className="font-display font-semibold">Al Tazah</span>
+            <span className="font-display font-semibold">{business?.name ?? "Rosterly"}</span>
           </div>
           <button onClick={handleLogout} className="text-paper/60">
             <IconLogout width={20} height={20} />

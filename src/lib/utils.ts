@@ -1,5 +1,3 @@
-import type { Employee, Shift } from "./types";
-
 // ---------- dates ----------
 
 export function toISODate(d: Date): string {
@@ -124,19 +122,8 @@ export function formatTimeShort(t: string): string {
 }
 
 // ---------- hours + money ----------
-
-/** Paid hours for a shift (gross span minus unpaid break). */
-export function shiftHours(shift: Pick<Shift, "startTime" | "endTime" | "breakMinutes">): number {
-  let mins = timeToMinutes(shift.endTime) - timeToMinutes(shift.startTime);
-  if (mins < 0) mins += 24 * 60; // overnight safety
-  mins -= shift.breakMinutes || 0;
-  return Math.max(0, mins) / 60;
-}
-
-export function shiftCost(shift: Shift, employee: Employee | undefined): number {
-  if (!employee) return 0;
-  return shiftHours(shift) * employee.hourlyRate;
-}
+// Shift/cost calculations return with the roster + costs modules (M5/M10),
+// as a single shared function per TECH_STACK §7.
 
 export function formatHours(h: number): string {
   return `${h.toFixed(h % 1 === 0 ? 0 : 1)}h`;
