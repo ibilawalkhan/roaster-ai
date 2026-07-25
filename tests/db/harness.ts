@@ -13,6 +13,10 @@ export interface Fixtures {
   businessB: string;
   locationA: string;
   locationB: string;
+  roleKitchenA: string;
+  roleFohA: string;
+  roleMgrA: string;
+  roleKitchenB: string;
   // auth.users ids (what a JWT `sub` would carry)
   authManagerA: string;
   authStaffA1: string;
@@ -23,10 +27,6 @@ export interface Fixtures {
   staffA1: string;
   staffA2: string;
   managerB: string;
-  rosterA: string;
-  rosterB: string;
-  shiftA1: string;
-  shiftB1: string;
 }
 
 export interface TestDb {
@@ -38,7 +38,6 @@ export interface TestDb {
 }
 
 function migrationSql(): string[] {
-  // Every .sql migration, in filename order — the same order Supabase applies.
   return readdirSync(migrationsDir)
     .filter((f) => f.endsWith(".sql"))
     .sort()
@@ -47,7 +46,7 @@ function migrationSql(): string[] {
 
 /**
  * Boot an in-process Postgres, provision the Supabase auth surface, apply the
- * real migrations, and seed two isolated tenants.
+ * real migrations, and seed two isolated tenants (Al Tazah + Guildford).
  */
 export async function setupTestDb(): Promise<TestDb> {
   const db = new PGlite();
@@ -60,13 +59,16 @@ export async function setupTestDb(): Promise<TestDb> {
     await db.exec(sql);
   }
 
-  // 3. Seed — runs as the PGlite owner (superuser), which bypasses RLS, exactly
-  //    as a service_role seed script would.
+  // 3. Seed as the PGlite owner (bypasses RLS, like a service_role seed).
   const fx: Fixtures = {
     businessA: randomUUID(),
     businessB: randomUUID(),
     locationA: randomUUID(),
     locationB: randomUUID(),
+    roleKitchenA: randomUUID(),
+    roleFohA: randomUUID(),
+    roleMgrA: randomUUID(),
+    roleKitchenB: randomUUID(),
     authManagerA: randomUUID(),
     authStaffA1: randomUUID(),
     authStaffA2: randomUUID(),
@@ -75,15 +77,10 @@ export async function setupTestDb(): Promise<TestDb> {
     staffA1: randomUUID(),
     staffA2: randomUUID(),
     managerB: randomUUID(),
-    rosterA: randomUUID(),
-    rosterB: randomUUID(),
-    shiftA1: randomUUID(),
-    shiftB1: randomUUID(),
   };
 
   const q = (text: string, params: unknown[]) => db.query(text, params);
 
-  // auth users
   for (const [id, phone] of [
     [fx.authManagerA, "61400000001"],
     [fx.authStaffA1, "61400000002"],
@@ -93,57 +90,61 @@ export async function setupTestDb(): Promise<TestDb> {
     await q("insert into auth.users (id, phone) values ($1, $2)", [id, phone]);
   }
 
-  // businesses
-  await q("insert into public.business (id, name) values ($1, $2), ($3, $4)", [
-    fx.businessA,
-    "Al Tazah Charcoal Chicken",
-    fx.businessB,
-    "Guildford Restaurant",
-  ]);
-
-  // locations
-  await q("insert into public.location (id, business_id, name) values ($1, $2, $3), ($4, $5, $6)", [
-    fx.locationA, fx.businessA, "Regents Park",
-    fx.locationB, fx.businessB, "Guildford",
-  ]);
-
-  // app_users — note the DIFFERENT pay rates (the wage-privacy test relies on
-  // staff A1 not being able to read staff A2's rate).
-  const users: [string, string, string, string, string, number, string][] = [
-    [fx.managerA, fx.businessA, fx.authManagerA, "Khaled Nasser", "manager", 38, fx.locationA],
-    [fx.staffA1, fx.businessA, fx.authStaffA1, "Sara Haddad", "staff", 30, fx.locationA],
-    [fx.staffA2, fx.businessA, fx.authStaffA2, "Ahmed Khan", "staff", 27, fx.locationA],
-    [fx.managerB, fx.businessB, fx.authManagerB, "Guildford Manager", "manager", 40, fx.locationB],
-  ];
-  for (const [id, biz, auth, name, role, rate, loc] of users) {
-    await q(
-      `insert into public.app_user
-         (id, business_id, auth_user_id, name, role, pay_rate, home_location_id, phone)
-       values ($1, $2, $3, $4, $5::public.app_role, $6, $7, $8)`,
-      [id, biz, auth, name, role, rate, loc, null],
-    );
-  }
-
-  // rosters (published so staff can see their shifts)
   await q(
-    `insert into public.roster (id, business_id, fortnight_start, status)
-     values ($1, $2, '2026-07-20', 'published'), ($3, $4, '2026-07-20', 'published')`,
-    [fx.rosterA, fx.businessA, fx.rosterB, fx.businessB],
+    "insert into public.business (id, name) values ($1, $2), ($3, $4)",
+    [fx.businessA, "Al Tazah Charcoal Chicken", fx.businessB, "Guildford Restaurant"],
   );
 
-  // one shift each, assigned
   await q(
-    `insert into public.shift
-       (id, business_id, location_id, roster_id, date, start_time, end_time,
-        break_minutes, assigned_user_id, status)
-     values
-       ($1, $2, $3, $4, '2026-07-21', '10:00', '16:30', 30, $5, 'ASSIGNED'),
-       ($6, $7, $8, $9, '2026-07-21', '11:00', '19:00', 30, $10, 'ASSIGNED')`,
+    "insert into public.location (id, business_id, name) values ($1, $2, $3), ($4, $5, $6)",
+    [fx.locationA, fx.businessA, "Regents Park", fx.locationB, fx.businessB, "Guildford"],
+  );
+
+  await q(
+    `insert into public.role (id, business_id, name, short_code) values
+       ($1, $2, 'Kitchen', 'KIT'),
+       ($3, $4, 'Front of House', 'FOH'),
+       ($5, $6, 'Manager', 'MGR'),
+       ($7, $8, 'Kitchen', 'KIT')`,
     [
-      fx.shiftA1, fx.businessA, fx.locationA, fx.rosterA, fx.staffA1,
-      fx.shiftB1, fx.businessB, fx.locationB, fx.rosterB, fx.managerB,
+      fx.roleKitchenA, fx.businessA,
+      fx.roleFohA, fx.businessA,
+      fx.roleMgrA, fx.businessA,
+      fx.roleKitchenB, fx.businessB,
     ],
   );
+
+  await q(
+    "insert into public.scheduling_rule (business_id) values ($1), ($2)",
+    [fx.businessA, fx.businessB],
+  );
+
+  await q(
+    `insert into public.trading_hours (business_id, location_id, day_of_week, opens_at, closes_at)
+     values ($1, $2, 1, '10:00', '22:30'), ($3, $4, 1, '10:00', '22:00')`,
+    [fx.businessA, fx.locationA, fx.businessB, fx.locationB],
+  );
+
+  // app_users — different pay rates so wage-privacy is meaningful.
+  const users: [string, string, string, string, boolean, string, number, string, string, string][] = [
+    [fx.managerA, fx.businessA, fx.authManagerA, "Khaled Nasser", true,  "senior", 38, "full_time", fx.roleMgrA, fx.locationA],
+    [fx.staffA1,  fx.businessA, fx.authStaffA1,  "Sara Haddad",   false, "mid",    30, "part_time", fx.roleKitchenA, fx.locationA],
+    [fx.staffA2,  fx.businessA, fx.authStaffA2,  "Ahmed Khan",    false, "mid",    27, "casual",    fx.roleFohA, fx.locationA],
+    [fx.managerB, fx.businessB, fx.authManagerB, "Guildford Mgr", true,  "senior", 40, "full_time", fx.roleKitchenB, fx.locationB],
+  ];
+  for (const [id, biz, auth, name, mgr, level, rate, emp, roleId, locId] of users) {
+    await q(
+      `insert into public.app_user
+         (id, business_id, auth_user_id, name, is_manager, level, pay_rate,
+          employment_type, primary_role_id, home_location_id)
+       values ($1,$2,$3,$4,$5,$6::public.user_level,$7,$8::public.employment_type,$9,$10)`,
+      [id, biz, auth, name, mgr, level, rate, emp, roleId, locId],
+    );
+    await q(
+      "insert into public.user_role (business_id, user_id, role_id) values ($1, $2, $3)",
+      [biz, id, roleId],
+    );
+  }
 
   const asUser = async <T,>(authUserId: string, fn: (db: PGlite) => Promise<T>): Promise<T> => {
     await db.exec(

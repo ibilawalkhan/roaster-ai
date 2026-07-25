@@ -27,6 +27,14 @@ port = 54323
 enabled = true
 port = 54324
 
+# Not used by Rosterly (no file uploads, no analytics). Disabling them drops the
+# storage-api, imgproxy and vector containers — fewer images to pull locally.
+[storage]
+enabled = false
+
+[analytics]
+enabled = false
+
 [auth]
 enabled = true
 site_url = "http://localhost:3000"
@@ -43,7 +51,17 @@ enable_confirmations = false
 [auth.sms]
 enable_signup = true
 enable_confirmations = false
-# Local dev: OTPs are printed to the Supabase logs / Inbucket, no real SMS sent.
+
+# A provider must be enabled or the CLI disables phone login. These are DUMMY
+# local credentials — test-OTP numbers below short-circuit before Twilio is ever
+# called, so no real SMS is sent and the token is never used. Real SMS is
+# configured per-environment (staging/prod) via the dashboard, not here.
+[auth.sms.twilio]
+enabled = true
+account_sid = "ACdummylocaldev0000000000000000000"
+message_service_sid = "MGdummylocaldev0000000000000000000"
+auth_token = "dummy-local-token-never-used"
+
 [auth.sms.test_otp]
 # Deterministic OTPs for local seeded phone numbers (no real SMS sent).
 "61400000001" = "000000"

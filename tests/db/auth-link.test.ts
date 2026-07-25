@@ -3,10 +3,10 @@ import { randomUUID } from "node:crypto";
 import { setupTestDb, type TestDb } from "./harness";
 
 /**
- * User↔staff matching on first login.
- * link_current_user() must claim the unlinked staff record whose phone matches
- * the caller's verified auth phone, be idempotent, and refuse unknown phones —
- * all while respecting tenant isolation (it only ever touches one business).
+ * User↔staff matching on first login (M11 §3.2).
+ * link_current_user() claims the unlinked staff record whose phone matches the
+ * caller's verified auth phone, sets invite_status='active', is idempotent, and
+ * refuses unknown phones — all within one business.
  */
 
 let t: TestDb;
@@ -24,23 +24,26 @@ async function seedUnlinked(phone: string, businessId: string) {
   const appUserId = randomUUID();
   await t.db.query("insert into auth.users (id, phone) values ($1, $2)", [authId, phone]);
   await t.db.query(
-    `insert into public.app_user (id, business_id, name, role, phone)
-     values ($1, $2, $3, 'staff', $4)`,
-    [appUserId, businessId, "New Hire", phone],
+    `insert into public.app_user (id, business_id, name, phone, is_manager)
+     values ($1, $2, 'New Hire', $3, false)`,
+    [appUserId, businessId, phone],
   );
   return { authId, appUserId };
 }
 
 describe("link_current_user()", () => {
-  it("links the caller to the unclaimed staff record with a matching phone", async () => {
+  it("links the caller and activates the invite", async () => {
     const { authId, appUserId } = await seedUnlinked("61411111111", t.fx.businessA);
 
     const linked = await t.asUser(authId, (db) =>
-      db.query<{ id: string; auth_user_id: string }>("select * from public.link_current_user()"),
+      db.query<{ id: string; auth_user_id: string; invite_status: string }>(
+        "select * from public.link_current_user()",
+      ),
     );
 
     expect(linked.rows[0].id).toBe(appUserId);
     expect(linked.rows[0].auth_user_id).toBe(authId);
+    expect(linked.rows[0].invite_status).toBe("active");
   });
 
   it("is idempotent — a second call returns the same record", async () => {
@@ -52,22 +55,16 @@ describe("link_current_user()", () => {
     expect(second.rows[0].id).toBe(appUserId);
   });
 
-  it("refuses a phone with no staff record", async () => {
-    const orphanAuth = randomUUID();
-    await t.db.query("insert into auth.users (id, phone) values ($1, $2)", [
-      orphanAuth,
-      "61499999999",
-    ]);
+  it("refuses a phone with no staff record (§6 #15)", async () => {
+    const orphan = randomUUID();
+    await t.db.query("insert into auth.users (id, phone) values ($1, $2)", [orphan, "61499999999"]);
     await expect(
-      t.asUser(orphanAuth, (db) => db.query("select * from public.link_current_user()")),
+      t.asUser(orphan, (db) => db.query("select * from public.link_current_user()")),
     ).rejects.toThrow(/no active staff record/i);
   });
 
-  it("does not let a phone claim a record in another business by accident", async () => {
-    // Same phone string seeded in business B; a business-A auth user must link
-    // to the A record, never B's. (Here we prove the linked row's business_id.)
-    const phone = "61433333333";
-    const { authId } = await seedUnlinked(phone, t.fx.businessA);
+  it("links to the caller's own business, never another", async () => {
+    const { authId } = await seedUnlinked("61433333333", t.fx.businessA);
     const linked = await t.asUser(authId, (db) =>
       db.query<{ business_id: string }>("select * from public.link_current_user()"),
     );

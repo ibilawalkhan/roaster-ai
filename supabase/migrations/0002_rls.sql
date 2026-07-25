@@ -1,99 +1,103 @@
--- Rosterly Row-Level Security (REQUIREMENTS.md §1.2, §6, §9).
+-- Rosterly Row-Level Security for the foundation tables (Module 11).
 --
--- Tenant isolation is the highest-stakes correctness property in the app.
--- The DATABASE is the boundary, not the UI. Every table below has RLS enabled
--- and every policy is scoped by business_id derived from the caller's JWT.
+-- The database is the security boundary. Every table has RLS enabled; every
+-- policy is scoped by the caller's business_id, derived via SECURITY DEFINER
+-- helpers that read app_user without re-triggering RLS (avoids recursion).
 --
--- Recursion note: policies on app_user cannot query app_user directly (a policy
--- that reads its own table recurses). We resolve the caller's business_id /
--- role / app_user id through SECURITY DEFINER helpers that run as the function
--- owner and therefore bypass RLS on app_user — the standard Supabase pattern.
+-- Permission model (M11 §4.1):
+--   business / location / role   → readable by all members, writable by managers
+--   trading_hours / scheduling_rule / break_rule → managers only (settings)
+--   app_user                     → staff read own; managers read all in business
+--   user_role                    → staff read own; managers write
 
 -- ---------------------------------------------------------------------------
--- Caller-context helpers (SECURITY DEFINER → bypass RLS, avoid recursion)
+-- Caller-context helpers (SECURITY DEFINER → bypass RLS on app_user)
 -- ---------------------------------------------------------------------------
 create or replace function public.current_app_user_id()
-returns uuid
-language sql
-stable
-security definer
-set search_path = public
-as $$
+returns uuid language sql stable security definer set search_path = public as $$
   select id from public.app_user where auth_user_id = auth.uid();
 $$;
 
 create or replace function public.current_business_id()
-returns uuid
-language sql
-stable
-security definer
-set search_path = public
-as $$
+returns uuid language sql stable security definer set search_path = public as $$
   select business_id from public.app_user where auth_user_id = auth.uid();
 $$;
 
-create or replace function public.current_user_role()
-returns public.app_role
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select role from public.app_user where auth_user_id = auth.uid();
-$$;
-
 create or replace function public.is_manager()
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
+returns boolean language sql stable security definer set search_path = public as $$
   select coalesce(
-    (select role = 'manager' from public.app_user where auth_user_id = auth.uid()),
+    (select is_manager from public.app_user where auth_user_id = auth.uid()),
     false
   );
 $$;
 
 -- ---------------------------------------------------------------------------
--- Enable RLS on every table
+-- Enable RLS everywhere (M11 §5.2: no table without RLS)
 -- ---------------------------------------------------------------------------
-alter table public.business     enable row level security;
-alter table public.location     enable row level security;
-alter table public.app_user     enable row level security;
-alter table public.roster       enable row level security;
-alter table public.shift        enable row level security;
-alter table public.shift_claim  enable row level security;
-alter table public.availability enable row level security;
-alter table public.notification enable row level security;
+alter table public.business        enable row level security;
+alter table public.location        enable row level security;
+alter table public.role            enable row level security;
+alter table public.trading_hours   enable row level security;
+alter table public.scheduling_rule enable row level security;
+alter table public.break_rule      enable row level security;
+alter table public.app_user        enable row level security;
+alter table public.user_role       enable row level security;
 
 -- ---------------------------------------------------------------------------
--- business — a user sees only their own business. Platform-level writes go
--- through the service_role (which bypasses RLS), never authenticated users.
+-- business — all members read their own business; managers update it.
+-- (Platform-level inserts go through service_role, which bypasses RLS.)
 -- ---------------------------------------------------------------------------
-create policy business_select_own on public.business
+create policy business_select on public.business
   for select to authenticated
   using (id = public.current_business_id());
 
+create policy business_update_manager on public.business
+  for update to authenticated
+  using (id = public.current_business_id() and public.is_manager())
+  with check (id = public.current_business_id() and public.is_manager());
+
 -- ---------------------------------------------------------------------------
--- location — everyone in the business reads; managers write.
+-- location & role — reference data: all members read, managers write.
+-- Staff need location names and job-role names/colours to render their shifts.
 -- ---------------------------------------------------------------------------
 create policy location_select on public.location
   for select to authenticated
   using (business_id = public.current_business_id());
-
 create policy location_write_manager on public.location
   for all to authenticated
   using (business_id = public.current_business_id() and public.is_manager())
   with check (business_id = public.current_business_id() and public.is_manager());
 
+create policy role_select on public.role
+  for select to authenticated
+  using (business_id = public.current_business_id());
+create policy role_write_manager on public.role
+  for all to authenticated
+  using (business_id = public.current_business_id() and public.is_manager())
+  with check (business_id = public.current_business_id() and public.is_manager());
+
 -- ---------------------------------------------------------------------------
--- app_user — the wage-privacy table.
---   * Staff can read ONLY their own row (so no one ever sees another's wage).
---   * Managers can read every row in their business.
---   * Staff can update their own row (a trigger blocks changes to sensitive
---     fields — pay_rate/role/active/business_id).
---   * Managers can insert/update/delete any row in their business.
+-- trading_hours / scheduling_rule / break_rule — manager-only (settings).
+-- ---------------------------------------------------------------------------
+create policy trading_hours_manager on public.trading_hours
+  for all to authenticated
+  using (business_id = public.current_business_id() and public.is_manager())
+  with check (business_id = public.current_business_id() and public.is_manager());
+
+create policy scheduling_rule_manager on public.scheduling_rule
+  for all to authenticated
+  using (business_id = public.current_business_id() and public.is_manager())
+  with check (business_id = public.current_business_id() and public.is_manager());
+
+create policy break_rule_manager on public.break_rule
+  for all to authenticated
+  using (business_id = public.current_business_id() and public.is_manager())
+  with check (business_id = public.current_business_id() and public.is_manager());
+
+-- ---------------------------------------------------------------------------
+-- app_user — staff read ONLY their own row (wage privacy); managers read all.
+-- Staff may update their own row; a trigger restricts WHICH columns (contact
+-- only). Managers write any row in their business.
 -- ---------------------------------------------------------------------------
 create policy app_user_select on public.app_user
   for select to authenticated
@@ -112,20 +116,27 @@ create policy app_user_write_manager on public.app_user
   using (business_id = public.current_business_id() and public.is_manager())
   with check (business_id = public.current_business_id() and public.is_manager());
 
--- Server-side guard (rule 2): a non-manager cannot escalate their own record.
--- RLS lets staff update their row; this trigger constrains WHICH columns.
+-- Staff self-edits are limited to contact fields (phone, email). Everything
+-- else — above all is_manager and pay_rate — is manager-only (M11 §4.1, §6 #13).
 create or replace function public.guard_app_user_update()
-returns trigger
-language plpgsql
-as $$
+returns trigger language plpgsql as $$
 begin
-  -- Only constrain authenticated end-users; service_role/seed (postgres) is trusted.
   if current_user = 'authenticated' and not public.is_manager() then
-    if new.pay_rate    is distinct from old.pay_rate
-       or new.role     is distinct from old.role
-       or new.active   is distinct from old.active
-       or new.business_id is distinct from old.business_id then
-      raise exception 'staff may not modify pay_rate, role, active or business_id';
+    if new.is_manager               is distinct from old.is_manager
+       or new.pay_rate              is distinct from old.pay_rate
+       or new.level                 is distinct from old.level
+       or new.employment_type       is distinct from old.employment_type
+       or new.primary_role_id       is distinct from old.primary_role_id
+       or new.home_location_id      is distinct from old.home_location_id
+       or new.can_work_other_locations is distinct from old.can_work_other_locations
+       or new.max_hours_week        is distinct from old.max_hours_week
+       or new.min_hours_week        is distinct from old.min_hours_week
+       or new.max_shifts_week       is distinct from old.max_shifts_week
+       or new.notes                 is distinct from old.notes
+       or new.active                is distinct from old.active
+       or new.business_id           is distinct from old.business_id
+       or new.name                  is distinct from old.name then
+      raise exception 'staff may only edit their own contact details (phone, email)';
     end if;
   end if;
   return new;
@@ -137,105 +148,24 @@ create trigger trg_guard_app_user_update
   for each row execute function public.guard_app_user_update();
 
 -- ---------------------------------------------------------------------------
--- roster — managers see all; staff see only PUBLISHED rosters. Managers write.
+-- user_role — staff read their own role assignments; managers manage all.
 -- ---------------------------------------------------------------------------
-create policy roster_select on public.roster
-  for select to authenticated
-  using (
-    business_id = public.current_business_id()
-    and (public.is_manager() or status = 'published')
-  );
-
-create policy roster_write_manager on public.roster
-  for all to authenticated
-  using (business_id = public.current_business_id() and public.is_manager())
-  with check (business_id = public.current_business_id() and public.is_manager());
-
--- ---------------------------------------------------------------------------
--- shift — managers see all in business; staff see their own assigned shifts
--- plus OPEN shifts they could claim. Managers write (staff drop/claim flows
--- are mediated by the §5.3 transaction in a later migration).
--- ---------------------------------------------------------------------------
-create policy shift_select on public.shift
-  for select to authenticated
-  using (
-    business_id = public.current_business_id()
-    and (
-      public.is_manager()
-      or assigned_user_id = public.current_app_user_id()
-      or status = 'OPEN'
-    )
-  );
-
-create policy shift_write_manager on public.shift
-  for all to authenticated
-  using (business_id = public.current_business_id() and public.is_manager())
-  with check (business_id = public.current_business_id() and public.is_manager());
-
--- ---------------------------------------------------------------------------
--- shift_claim — managers see all in business; staff see their own claims and
--- may create a claim for themselves.
--- ---------------------------------------------------------------------------
-create policy shift_claim_select on public.shift_claim
-  for select to authenticated
-  using (
-    business_id = public.current_business_id()
-    and (public.is_manager() or claimant_user_id = public.current_app_user_id())
-  );
-
-create policy shift_claim_insert_own on public.shift_claim
-  for insert to authenticated
-  with check (
-    business_id = public.current_business_id()
-    and claimant_user_id = public.current_app_user_id()
-  );
-
-create policy shift_claim_manage_manager on public.shift_claim
-  for all to authenticated
-  using (business_id = public.current_business_id() and public.is_manager())
-  with check (business_id = public.current_business_id() and public.is_manager());
-
--- ---------------------------------------------------------------------------
--- availability — staff manage their own; managers read all in business.
--- ---------------------------------------------------------------------------
-create policy availability_select on public.availability
+create policy user_role_select on public.user_role
   for select to authenticated
   using (
     business_id = public.current_business_id()
     and (public.is_manager() or user_id = public.current_app_user_id())
   );
 
-create policy availability_write_own on public.availability
+create policy user_role_write_manager on public.user_role
   for all to authenticated
-  using (
-    business_id = public.current_business_id()
-    and user_id = public.current_app_user_id()
-  )
-  with check (
-    business_id = public.current_business_id()
-    and user_id = public.current_app_user_id()
-  );
-
--- ---------------------------------------------------------------------------
--- notification — a user sees and updates only their own notifications.
--- Rows are created by trusted server code (service_role) which bypasses RLS.
--- ---------------------------------------------------------------------------
-create policy notification_select_own on public.notification
-  for select to authenticated
-  using (user_id = public.current_app_user_id());
-
-create policy notification_update_own on public.notification
-  for update to authenticated
-  using (user_id = public.current_app_user_id())
-  with check (user_id = public.current_app_user_id());
+  using (business_id = public.current_business_id() and public.is_manager())
+  with check (business_id = public.current_business_id() and public.is_manager());
 
 -- ---------------------------------------------------------------------------
 -- Grants. RLS restricts rows; roles still need base table privileges.
--- `anon` (unauthenticated) gets nothing. `authenticated` gets DML, gated by
--- the policies above. `service_role` bypasses RLS entirely (trusted server).
 -- ---------------------------------------------------------------------------
 grant usage on schema public to anon, authenticated, service_role;
-
 grant select, insert, update, delete on all tables in schema public to authenticated;
 grant all on all tables in schema public to service_role;
 grant execute on all functions in schema public to authenticated, service_role;

@@ -2,10 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { setupTestDb, type TestDb } from "./harness";
 
 /**
- * The tenant-isolation invariant (REQUIREMENTS.md §1, §9; CLAUDE.md rule 1).
- * The highest-stakes correctness property in the app: business A can never see
- * business B's rows, and no staff member can ever see another's wage. These
- * assertions run against the REAL RLS policies in supabase/migrations.
+ * Tenant-isolation + within-business access suite (Module 11 §6).
+ * The database is the security boundary — these assertions run against the REAL
+ * RLS policies in supabase/migrations. Cases are numbered to M11 §6.
  */
 
 let t: TestDb;
@@ -18,127 +17,128 @@ afterAll(async () => {
   await t?.close();
 });
 
-describe("cross-tenant isolation (business A cannot read business B)", () => {
+describe("cross-tenant isolation — business A cannot read business B (§6 #1–4)", () => {
   it("manager A sees only their own business row", async () => {
     const { rows } = await t.asUser(t.fx.authManagerA, (db) =>
-      db.query<{ id: string; name: string }>("select id, name from public.business"),
+      db.query<{ id: string }>("select id from public.business"),
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].id).toBe(t.fx.businessA);
   });
 
-  it("manager A cannot read business B's locations", async () => {
-    const { rows } = await t.asUser(t.fx.authManagerA, (db) =>
-      db.query<{ business_id: string }>("select business_id from public.location"),
-    );
-    expect(rows).toHaveLength(1);
-    expect(rows.every((r) => r.business_id === t.fx.businessA)).toBe(true);
+  it("manager A cannot read B's locations, roles, staff, trading hours or rules", async () => {
+    const tables = ["location", "role", "app_user", "trading_hours", "scheduling_rule"];
+    for (const tbl of tables) {
+      const { rows } = await t.asUser(t.fx.authManagerA, (db) =>
+        db.query<{ business_id: string }>(`select business_id from public.${tbl}`),
+      );
+      expect(rows.length).toBeGreaterThan(0); // A's own rows are visible
+      expect(rows.every((r) => r.business_id === t.fx.businessA)).toBe(true);
+      expect(rows.find((r) => r.business_id === t.fx.businessB)).toBeUndefined();
+    }
   });
 
-  it("manager A cannot read business B's staff", async () => {
-    const { rows } = await t.asUser(t.fx.authManagerA, (db) =>
-      db.query<{ business_id: string }>("select business_id from public.app_user"),
-    );
-    expect(rows.length).toBeGreaterThan(0);
-    expect(rows.every((r) => r.business_id === t.fx.businessA)).toBe(true);
-  });
-
-  it("manager A cannot read business B's rosters or shifts", async () => {
-    const rosters = await t.asUser(t.fx.authManagerA, (db) =>
-      db.query<{ business_id: string }>("select business_id from public.roster"),
-    );
-    const shifts = await t.asUser(t.fx.authManagerA, (db) =>
-      db.query<{ business_id: string }>("select business_id from public.shift"),
-    );
-    expect(rosters.rows.every((r) => r.business_id === t.fx.businessA)).toBe(true);
-    expect(shifts.rows.every((r) => r.business_id === t.fx.businessA)).toBe(true);
-    expect(shifts.rows.find((r) => r.business_id === t.fx.businessB)).toBeUndefined();
-  });
-
-  it("a cross-tenant UPDATE affects zero rows (write isolation)", async () => {
+  it("a cross-tenant UPDATE affects zero rows (§6 #3)", async () => {
     const res = await t.asUser(t.fx.authManagerA, (db) =>
-      db.query("update public.app_user set name = 'HACKED' where business_id = $1", [
-        t.fx.businessB,
-      ]),
+      db.query("update public.app_user set name = 'HACKED' where business_id = $1", [t.fx.businessB]),
     );
     expect(res.affectedRows ?? 0).toBe(0);
-
-    // Confirm B's manager row is untouched, read from B's own context.
     const check = await t.asUser(t.fx.authManagerB, (db) =>
-      db.query<{ name: string }>("select name from public.app_user where id = $1", [
-        t.fx.managerB,
-      ]),
+      db.query<{ name: string }>("select name from public.app_user where id = $1", [t.fx.managerB]),
     );
-    expect(check.rows[0].name).toBe("Guildford Manager");
+    expect(check.rows[0].name).toBe("Guildford Mgr");
+  });
+
+  it("staff of A cannot read anything of B (§6 #4)", async () => {
+    const { rows } = await t.asUser(t.fx.authStaffA1, (db) =>
+      db.query("select id from public.business where id = $1", [t.fx.businessB]),
+    );
+    expect(rows).toHaveLength(0);
   });
 });
 
-describe("wage privacy (no staff member ever sees another's wage)", () => {
-  it("staff A1 can read only their own app_user row", async () => {
+describe("within-business — wage & settings privacy (§6 #6–8, #13)", () => {
+  it("staff A1 reads only their own app_user row (§6 #6 wage privacy)", async () => {
     const { rows } = await t.asUser(t.fx.authStaffA1, (db) =>
-      db.query<{ id: string; pay_rate: string }>("select id, pay_rate from public.app_user"),
+      db.query<{ id: string }>("select id from public.app_user"),
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].id).toBe(t.fx.staffA1);
   });
 
-  it("staff A1 cannot see colleague A2's row or pay rate", async () => {
+  it("staff A1 cannot see colleague A2's row", async () => {
     const { rows } = await t.asUser(t.fx.authStaffA1, (db) =>
-      db.query<{ id: string }>("select id from public.app_user where id = $1", [t.fx.staffA2]),
+      db.query("select id from public.app_user where id = $1", [t.fx.staffA2]),
     );
     expect(rows).toHaveLength(0);
   });
 
-  it("a manager CAN see all staff in their own business (positive control)", async () => {
-    const { rows } = await t.asUser(t.fx.authManagerA, (db) =>
-      db.query("select id from public.app_user"),
+  it("staff cannot read scheduling rules or trading hours (manager-only) (§6 #8-ish)", async () => {
+    const rules = await t.asUser(t.fx.authStaffA1, (db) =>
+      db.query("select id from public.scheduling_rule"),
     );
-    // managerA + staffA1 + staffA2
-    expect(rows).toHaveLength(3);
+    const hours = await t.asUser(t.fx.authStaffA1, (db) =>
+      db.query("select id from public.trading_hours"),
+    );
+    expect(rules.rows).toHaveLength(0);
+    expect(hours.rows).toHaveLength(0);
   });
 
-  it("staff A1 cannot escalate: updating own pay_rate is rejected", async () => {
+  it("staff CAN read locations and roles (reference data they need)", async () => {
+    const locs = await t.asUser(t.fx.authStaffA1, (db) => db.query("select id from public.location"));
+    const roles = await t.asUser(t.fx.authStaffA1, (db) => db.query("select id from public.role"));
+    expect(locs.rows.length).toBeGreaterThan(0);
+    expect(roles.rows.length).toBeGreaterThan(0);
+  });
+
+  it("staff cannot escalate themselves to manager (§6 #13)", async () => {
+    await expect(
+      t.asUser(t.fx.authStaffA1, (db) =>
+        db.query("update public.app_user set is_manager = true where id = $1", [t.fx.staffA1]),
+      ),
+    ).rejects.toThrow(/contact details/i);
+  });
+
+  it("staff cannot change their own pay rate", async () => {
     await expect(
       t.asUser(t.fx.authStaffA1, (db) =>
         db.query("update public.app_user set pay_rate = 999 where id = $1", [t.fx.staffA1]),
       ),
-    ).rejects.toThrow(/pay_rate/i);
+    ).rejects.toThrow(/contact details/i);
   });
 
-  it("staff A1 CAN update their own contact detail (email)", async () => {
+  it("staff CAN update their own email", async () => {
     const res = await t.asUser(t.fx.authStaffA1, (db) =>
-      db.query("update public.app_user set email = 'sara.new@altazah.com.au' where id = $1", [
-        t.fx.staffA1,
-      ]),
+      db.query("update public.app_user set email = 'sara.new@altazah.com.au' where id = $1", [t.fx.staffA1]),
     );
     expect(res.affectedRows ?? 0).toBe(1);
   });
 });
 
-describe("staff row visibility", () => {
-  it("staff A1 sees their own assigned shift", async () => {
-    const { rows } = await t.asUser(t.fx.authStaffA1, (db) =>
-      db.query<{ id: string }>("select id from public.shift"),
+describe("manager positive controls", () => {
+  it("manager A sees all staff in their business", async () => {
+    const { rows } = await t.asUser(t.fx.authManagerA, (db) =>
+      db.query("select id from public.app_user"),
     );
-    expect(rows.map((r) => r.id)).toContain(t.fx.shiftA1);
+    expect(rows).toHaveLength(3); // managerA + staffA1 + staffA2
   });
 
-  it("staff A1 never sees business B's shift", async () => {
-    const { rows } = await t.asUser(t.fx.authStaffA1, (db) =>
-      db.query<{ id: string }>("select id from public.shift where id = $1", [t.fx.shiftB1]),
+  it("manager A can read their scheduling rule and trading hours", async () => {
+    const rules = await t.asUser(t.fx.authManagerA, (db) =>
+      db.query("select id from public.scheduling_rule"),
     );
-    expect(rows).toHaveLength(0);
+    const hours = await t.asUser(t.fx.authManagerA, (db) =>
+      db.query("select id from public.trading_hours"),
+    );
+    expect(rules.rows).toHaveLength(1);
+    expect(hours.rows.length).toBeGreaterThan(0);
   });
 });
 
 describe("unauthenticated access", () => {
-  it("a request with no JWT sees no rows", async () => {
-    // No asUser wrapper → role stays as the (owner) session but with empty
-    // claims; current_business_id() resolves to NULL so policies match nothing
-    // for authenticated. Simulate an authenticated request with a bogus sub.
-    const { rows } = await t.asUser(
-      "00000000-0000-0000-0000-000000000000",
-      (db) => db.query("select id from public.business"),
+  it("a request with an unknown JWT sub sees no rows (§6 #15)", async () => {
+    const { rows } = await t.asUser("00000000-0000-0000-0000-000000000000", (db) =>
+      db.query("select id from public.business"),
     );
     expect(rows).toHaveLength(0);
   });
