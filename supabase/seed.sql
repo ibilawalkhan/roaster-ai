@@ -52,3 +52,18 @@ insert into public.app_user
 -- Roles each person can work (M2 user_role). Primary role at minimum.
 insert into public.user_role (business_id, user_id, role_id)
 select a.business_id, a.id, a.primary_role_id from public.app_user a where a.primary_role_id is not null;
+
+-- Availability (M3): Sara works evenings Mon–Fri, off weekends; a sample.
+insert into public.availability_pattern (business_id, user_id, day_of_week, is_available, from_time, to_time)
+select a.business_id, a.id, d.dow, d.avail, d.f, d.t
+from public.app_user a
+cross join (values
+  (1, true,  '16:00'::time, '23:00'::time),
+  (2, true,  '16:00'::time, '23:00'::time),
+  (3, true,  null::time,    null::time),
+  (4, true,  '16:00'::time, '23:00'::time),
+  (5, true,  '16:00'::time, '23:00'::time),
+  (6, false, null::time,    null::time),
+  (0, false, null::time,    null::time)
+) as d(dow, avail, f, t)
+where a.phone = '61400000002';

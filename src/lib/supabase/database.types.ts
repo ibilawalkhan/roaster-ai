@@ -322,6 +322,84 @@ export type Database = {
         };
         Relationships: [];
       };
+      availability_pattern: {
+        Row: {
+          id: string;
+          business_id: string;
+          user_id: string;
+          day_of_week: number;
+          is_available: boolean;
+          from_time: string | null;
+          to_time: string | null;
+          updated_by_user_id: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          user_id: string;
+          day_of_week: number;
+          is_available?: boolean;
+          from_time?: string | null;
+          to_time?: string | null;
+          updated_by_user_id?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          business_id?: string;
+          user_id?: string;
+          day_of_week?: number;
+          is_available?: boolean;
+          from_time?: string | null;
+          to_time?: string | null;
+          updated_by_user_id?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      availability_exception: {
+        Row: {
+          id: string;
+          business_id: string;
+          user_id: string;
+          date: string;
+          is_available: boolean;
+          from_time: string | null;
+          to_time: string | null;
+          reason: string | null;
+          source: string;
+          created_by_user_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          user_id: string;
+          date: string;
+          is_available: boolean;
+          from_time?: string | null;
+          to_time?: string | null;
+          reason?: string | null;
+          source?: string;
+          created_by_user_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          business_id?: string;
+          user_id?: string;
+          date?: string;
+          is_available?: boolean;
+          from_time?: string | null;
+          to_time?: string | null;
+          reason?: string | null;
+          source?: string;
+          created_by_user_id?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: { [_ in never]: never };
     Functions: {

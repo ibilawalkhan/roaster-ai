@@ -7,6 +7,7 @@ import { useStore } from "@/lib/store";
 import {
   IconCalendar,
   IconChart,
+  IconClock,
   IconFlame,
   IconHome,
   IconLogout,
@@ -17,6 +18,7 @@ const NAV = [
   { href: "/admin", label: "Dashboard", icon: IconHome, exact: true },
   { href: "/admin/schedule", label: "Schedule", icon: IconCalendar },
   { href: "/admin/employees", label: "Team", icon: IconUsers },
+  { href: "/admin/availability", label: "Availability", icon: IconClock },
   { href: "/admin/costs", label: "Costs", icon: IconChart },
 ];
 

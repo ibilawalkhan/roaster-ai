@@ -146,6 +146,23 @@ export async function setupTestDb(): Promise<TestDb> {
     );
   }
 
+  // Availability (M3): patterns for A1 (limited), A2 (day off), B manager; an
+  // exception for A1 — so isolation tests have real cross-user/tenant rows.
+  await q(
+    `insert into public.availability_pattern
+       (business_id, user_id, day_of_week, is_available, from_time, to_time)
+     values
+       ($1, $2, 1, true,  '16:00', '23:00'),
+       ($3, $4, 1, false, null, null),
+       ($5, $6, 1, true,  null, null)`,
+    [fx.businessA, fx.staffA1, fx.businessA, fx.staffA2, fx.businessB, fx.managerB],
+  );
+  await q(
+    `insert into public.availability_exception (business_id, user_id, date, is_available, source)
+     values ($1, $2, '2026-08-15', false, 'staff')`,
+    [fx.businessA, fx.staffA1],
+  );
+
   const asUser = async <T,>(authUserId: string, fn: (db: PGlite) => Promise<T>): Promise<T> => {
     await db.exec(
       `set role authenticated;

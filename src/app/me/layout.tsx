@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { useStore } from "@/lib/store";
 import { Avatar } from "@/components/ui";
-import { IconCalendar, IconFlame, IconLogout, IconUser } from "@/components/icons";
+import { IconCalendar, IconClock, IconFlame, IconLogout, IconUser } from "@/components/icons";
 
 export default function EmployeeLayout({ children }: { children: ReactNode }) {
   const { session, hydrated, me, business, logout } = useStore();
@@ -28,6 +28,7 @@ export default function EmployeeLayout({ children }: { children: ReactNode }) {
 
   const tabs = [
     { href: "/me", label: "Shifts", icon: IconCalendar, exact: true },
+    { href: "/me/availability", label: "Availability", icon: IconClock, exact: false },
     { href: "/me/profile", label: "Profile", icon: IconUser },
   ];
 
