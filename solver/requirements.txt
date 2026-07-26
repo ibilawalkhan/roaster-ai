@@ -1,0 +1,10 @@
+# Rosterly Module 5 auto-scheduler — Python dependencies.
+# Target runtime: Python 3.12 (TECH_STACK.md §1). ortools 9.15 also ships
+# cp313 wheels, so 3.13 works; pin 3.11/3.12 in CI/Lambda for parity with the
+# documented stack.
+ortools>=9.12,<10
+flask>=3.0
+pytest>=8.0
+# tzdata is required so zoneinfo can resolve Australia/Sydney on Windows and on
+# the slim Lambda base image, which do not ship the system IANA tz database.
+tzdata>=2024.1

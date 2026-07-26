@@ -67,3 +67,78 @@ cross join (values
   (0, false, null::time,    null::time)
 ) as d(dow, avail, f, t)
 where a.phone = '61400000002';
+
+-- ── Week template (M4) ──────────────────────────────────────────────────────
+-- Al Tazah's one default template (MVP ships exactly one — M4 §4.5). A minimal
+-- but realistic Regents Park week: a Kitchen + FOH day slot each weekday, with a
+-- second Kitchen closing shift and an extra FOH hand on the busy Fri/Sat.
+insert into public.week_template (id, business_id, name, is_default) values
+  ('00000000-0000-0000-0000-0000000000e1', '00000000-0000-0000-0000-0000000000a1', 'Normal week', true);
+
+-- Weekday base (Mon–Fri = dow 1..5): open Kitchen + FOH, plus a Kitchen close.
+insert into public.template_slot
+  (business_id, template_id, location_id, day_of_week, role_id, start_time, end_time, count, required_level, label)
+select
+  '00000000-0000-0000-0000-0000000000a1',
+  '00000000-0000-0000-0000-0000000000e1',
+  '00000000-0000-0000-0000-0000000000a2',
+  d.dow, s.role_id, s.start_time, s.end_time, s.count, s.required_level, s.label
+from generate_series(1, 5) as d(dow)
+cross join (values
+  ('00000000-0000-0000-0000-0000000000c1'::uuid, '10:00'::time, '18:00'::time, 1, null::public.user_level, 'open'),
+  ('00000000-0000-0000-0000-0000000000c2'::uuid, '11:00'::time, '19:00'::time, 1, null::public.user_level, 'lunch'),
+  ('00000000-0000-0000-0000-0000000000c1'::uuid, '16:00'::time, '22:30'::time, 1, 'senior'::public.user_level, 'close')
+) as s(role_id, start_time, end_time, count, required_level, label);
+
+-- Busy Fri/Sat (dow 5,6): an extra FOH hand for the evening rush.
+insert into public.template_slot
+  (business_id, template_id, location_id, day_of_week, role_id, start_time, end_time, count, label)
+select
+  '00000000-0000-0000-0000-0000000000a1',
+  '00000000-0000-0000-0000-0000000000e1',
+  '00000000-0000-0000-0000-0000000000a2',
+  d.dow, '00000000-0000-0000-0000-0000000000c2', '17:00'::time, '22:30'::time, 2, 'dinner rush'
+from (values (5), (6)) as d(dow);
+
+-- ── Roster (M5) ─────────────────────────────────────────────────────────────
+-- One draft roster for Al Tazah's Regents Park week beginning Mon 2026-08-03,
+-- seeded from the Normal week template. Timestamps are UTC (August = AEST +10, no
+-- DST); the wall-clock times below are Australia/Sydney and converted on insert.
+insert into public.roster (id, business_id, location_scope, start_date, days, status, template_id)
+values ('00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000a1',
+        '00000000-0000-0000-0000-0000000000a2', '2026-08-03', 7, 'draft',
+        '00000000-0000-0000-0000-0000000000e1');
+
+-- Three concrete Monday requirements copied from the template (M5 §9).
+insert into public.roster_position
+  (id, business_id, roster_id, location_id, date, role_id, start_at, end_at, required_level, label)
+values
+  ('00000000-0000-0000-0000-000000000f11', '00000000-0000-0000-0000-0000000000a1',
+   '00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000a2',
+   '2026-08-03', '00000000-0000-0000-0000-0000000000c1',
+   '2026-08-03 10:00 Australia/Sydney', '2026-08-03 18:00 Australia/Sydney', null, 'open'),
+  ('00000000-0000-0000-0000-000000000f12', '00000000-0000-0000-0000-0000000000a1',
+   '00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000a2',
+   '2026-08-03', '00000000-0000-0000-0000-0000000000c2',
+   '2026-08-03 11:00 Australia/Sydney', '2026-08-03 19:00 Australia/Sydney', null, 'lunch'),
+  ('00000000-0000-0000-0000-000000000f13', '00000000-0000-0000-0000-0000000000a1',
+   '00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000a2',
+   '2026-08-03', '00000000-0000-0000-0000-0000000000c1',
+   '2026-08-03 16:00 Australia/Sydney', '2026-08-03 22:30 Australia/Sydney', 'senior', 'close');
+
+-- Two of the three positions filled by seeded staff (Sara → Kitchen open,
+-- Ahmed → FOH lunch); the senior close stays unfilled (a first-class gap, M5 §5.2).
+insert into public.shift
+  (business_id, roster_id, roster_position_id, location_id, date, start_at, end_at,
+   break_minutes, role_id, assigned_user_id, origin, pay_rate_snapshot)
+select
+  '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000f1',
+  s.position_id, '00000000-0000-0000-0000-0000000000a2', '2026-08-03',
+  s.start_at, s.end_at, s.brk, s.role_id, a.id, 'auto', a.pay_rate
+from (values
+  ('00000000-0000-0000-0000-000000000f11'::uuid, '2026-08-03 10:00 Australia/Sydney'::timestamptz,
+   '2026-08-03 18:00 Australia/Sydney'::timestamptz, 30, '00000000-0000-0000-0000-0000000000c1'::uuid, '61400000002'),
+  ('00000000-0000-0000-0000-000000000f12'::uuid, '2026-08-03 11:00 Australia/Sydney'::timestamptz,
+   '2026-08-03 19:00 Australia/Sydney'::timestamptz, 30, '00000000-0000-0000-0000-0000000000c2'::uuid, '61400000003')
+) as s(position_id, start_at, end_at, brk, role_id, phone)
+join public.app_user a on a.phone = s.phone;

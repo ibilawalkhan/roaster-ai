@@ -27,6 +27,21 @@ export interface Fixtures {
   staffA1: string;
   staffA2: string;
   managerB: string;
+  // week template + slot ids (M4)
+  templateA: string;
+  slotA: string;
+  templateB: string;
+  slotB: string;
+  // roster ids (M5) — a published and a draft roster for A, one roster for B
+  rosterPubA: string;
+  rosterDraftA: string;
+  rosterB: string;
+  positionA: string;
+  positionB: string;
+  shiftPubA: string;    // published roster, assigned to staffA1
+  shiftDraftA: string;  // draft roster, assigned to staffA1
+  shiftB: string;
+  solveRunA: string;
 }
 
 export interface TestDb {
@@ -77,6 +92,19 @@ export async function setupTestDb(): Promise<TestDb> {
     staffA1: randomUUID(),
     staffA2: randomUUID(),
     managerB: randomUUID(),
+    templateA: randomUUID(),
+    slotA: randomUUID(),
+    templateB: randomUUID(),
+    slotB: randomUUID(),
+    rosterPubA: randomUUID(),
+    rosterDraftA: randomUUID(),
+    rosterB: randomUUID(),
+    positionA: randomUUID(),
+    positionB: randomUUID(),
+    shiftPubA: randomUUID(),
+    shiftDraftA: randomUUID(),
+    shiftB: randomUUID(),
+    solveRunA: randomUUID(),
   };
 
   const q = (text: string, params: unknown[]) => db.query(text, params);
@@ -161,6 +189,68 @@ export async function setupTestDb(): Promise<TestDb> {
     `insert into public.availability_exception (business_id, user_id, date, is_available, source)
      values ($1, $2, '2026-08-15', false, 'staff')`,
     [fx.businessA, fx.staffA1],
+  );
+
+  // Week templates (M4): one default template + a slot per business, so the
+  // template-isolation test has real own-tenant and cross-tenant rows.
+  await q(
+    "insert into public.week_template (id, business_id, name) values ($1, $2, 'Normal week'), ($3, $4, 'Normal week')",
+    [fx.templateA, fx.businessA, fx.templateB, fx.businessB],
+  );
+  await q(
+    `insert into public.template_slot
+       (id, business_id, template_id, location_id, day_of_week, role_id, start_time, end_time, count)
+     values
+       ($1, $2, $3, $4, 1, $5, '16:00', '23:00', 2),
+       ($6, $7, $8, $9, 1, $10, '10:00', '18:00', 1)`,
+    [
+      fx.slotA, fx.businessA, fx.templateA, fx.locationA, fx.roleKitchenA,
+      fx.slotB, fx.businessB, fx.templateB, fx.locationB, fx.roleKitchenB,
+    ],
+  );
+
+  // Rosters (M5): A has a PUBLISHED and a DRAFT roster; B has one roster. Each
+  // carries a shift assigned to a staff member so the RLS tests can prove staff
+  // see their own shift only in a published roster, never a draft, never cross-tenant.
+  await q(
+    `insert into public.roster (id, business_id, start_date, days, status, published_at)
+     values
+       ($1, $2, '2026-08-03', 7, 'published', now()),
+       ($3, $4, '2026-08-03', 7, 'draft',     null),
+       ($5, $6, '2026-08-03', 7, 'published', now())`,
+    [fx.rosterPubA, fx.businessA, fx.rosterDraftA, fx.businessA, fx.rosterB, fx.businessB],
+  );
+  await q(
+    `insert into public.roster_position
+       (id, business_id, roster_id, location_id, date, role_id, start_at, end_at)
+     values
+       ($1, $2, $3, $4, '2026-08-03', $5, '2026-08-03 06:00+00', '2026-08-03 13:00+00'),
+       ($6, $7, $8, $9, '2026-08-03', $10, '2026-08-03 06:00+00', '2026-08-03 13:00+00')`,
+    [
+      fx.positionA, fx.businessA, fx.rosterPubA, fx.locationA, fx.roleKitchenA,
+      fx.positionB, fx.businessB, fx.rosterB, fx.locationB, fx.roleKitchenB,
+    ],
+  );
+  await q(
+    `insert into public.shift
+       (id, business_id, roster_id, roster_position_id, location_id, date, start_at, end_at, role_id, assigned_user_id, status)
+     values
+       ($1, $2, $3, $4, $5, '2026-08-03', '2026-08-03 06:00+00', '2026-08-03 13:00+00', $6, $7, 'assigned'),
+       ($8, $9, $10, null, $11, '2026-08-03', '2026-08-03 06:00+00', '2026-08-03 13:00+00', $12, $13, 'assigned'),
+       ($14, $15, $16, $17, $18, '2026-08-03', '2026-08-03 06:00+00', '2026-08-03 13:00+00', $19, $20, 'assigned')`,
+    [
+      // published roster A, assigned to staffA1
+      fx.shiftPubA, fx.businessA, fx.rosterPubA, fx.positionA, fx.locationA, fx.roleKitchenA, fx.staffA1,
+      // draft roster A, assigned to staffA1 (must stay invisible to staff)
+      fx.shiftDraftA, fx.businessA, fx.rosterDraftA, fx.locationA, fx.roleKitchenA, fx.staffA1,
+      // published roster B, assigned to managerB
+      fx.shiftB, fx.businessB, fx.rosterB, fx.positionB, fx.locationB, fx.roleKitchenB, fx.managerB,
+    ],
+  );
+  await q(
+    `insert into public.solve_run (id, business_id, roster_id, seed, time_limit, status)
+     values ($1, $2, $3, 42, 15, 'ok')`,
+    [fx.solveRunA, fx.businessA, fx.rosterPubA],
   );
 
   const asUser = async <T,>(authUserId: string, fn: (db: PGlite) => Promise<T>): Promise<T> => {

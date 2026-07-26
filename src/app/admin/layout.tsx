@@ -11,12 +11,14 @@ import {
   IconFlame,
   IconHome,
   IconLogout,
+  IconReceipt,
   IconUsers,
 } from "@/components/icons";
 
 const NAV = [
   { href: "/admin", label: "Dashboard", icon: IconHome, exact: true },
   { href: "/admin/schedule", label: "Schedule", icon: IconCalendar },
+  { href: "/admin/template", label: "Template", icon: IconReceipt },
   { href: "/admin/employees", label: "Team", icon: IconUsers },
   { href: "/admin/availability", label: "Availability", icon: IconClock },
   { href: "/admin/costs", label: "Costs", icon: IconChart },

@@ -45,3 +45,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# python / solver
+/solver/.venv
+__pycache__/
+*.pyc
+.pytest_cache/
