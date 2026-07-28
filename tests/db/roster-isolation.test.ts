@@ -38,7 +38,7 @@ describe("manager reads own rosters, positions, shifts, solve runs", () => {
       db.query("select id from public.solve_run"),
     );
     expect(pos.rows).toHaveLength(1); // positionA only
-    expect(shifts.rows).toHaveLength(2); // shiftPubA + shiftDraftA
+    expect(shifts.rows).toHaveLength(3); // shiftPubA + shiftDraftA + openShiftA (M8 fixture)
     expect(runs.rows).toHaveLength(1); // solveRunA
   });
 });
@@ -87,10 +87,15 @@ describe("cross-tenant — manager A cannot reach business B (§6 #2)", () => {
 describe("staff shift visibility — published vs draft (§6 #9, M11 §5.1)", () => {
   it("staff A1 reads their OWN shift in a PUBLISHED roster", async () => {
     const { rows } = await t.asUser(t.fx.authStaffA1, (db) =>
-      db.query<{ id: string }>("select id from public.shift"),
+      db.query<{ id: string; assigned_user_id: string }>(
+        "select id, assigned_user_id from public.shift",
+      ),
     );
-    expect(rows).toHaveLength(1);
-    expect(rows[0].id).toBe(t.fx.shiftPubA); // only the published one
+    const ids = rows.map((r) => r.id);
+    expect(ids).toContain(t.fx.shiftPubA);          // published → visible
+    expect(ids).not.toContain(t.fx.shiftDraftA);    // draft → invisible
+    // Everything visible is their own assignment, nobody else's.
+    expect(rows.every((r) => r.assigned_user_id === t.fx.staffA1)).toBe(true);
   });
 
   it("staff A1 CANNOT read their own shift in a DRAFT roster", async () => {

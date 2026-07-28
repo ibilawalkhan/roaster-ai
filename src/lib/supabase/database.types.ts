@@ -490,6 +490,7 @@ export type Database = {
           created_by: string | null;
           created_at: string;
           published_at: string | null;
+          published_by: string | null;
         };
         Insert: {
           id?: string;
@@ -502,6 +503,7 @@ export type Database = {
           created_by?: string | null;
           created_at?: string;
           published_at?: string | null;
+          published_by?: string | null;
         };
         Update: {
           id?: string;
@@ -514,6 +516,7 @@ export type Database = {
           created_by?: string | null;
           created_at?: string;
           published_at?: string | null;
+          published_by?: string | null;
         };
         Relationships: [];
       };
@@ -578,6 +581,10 @@ export type Database = {
           pay_rate_snapshot: number | null;
           created_at: string;
           updated_at: string;
+          drop_requested_by: string | null;
+          drop_reason: string | null;
+          drop_requested_at: string | null;
+          original_user_id: string | null;
         };
         Insert: {
           id?: string;
@@ -597,6 +604,10 @@ export type Database = {
           pay_rate_snapshot?: number | null;
           created_at?: string;
           updated_at?: string;
+          drop_requested_by?: string | null;
+          drop_reason?: string | null;
+          drop_requested_at?: string | null;
+          original_user_id?: string | null;
         };
         Update: {
           id?: string;
@@ -616,6 +627,10 @@ export type Database = {
           pay_rate_snapshot?: number | null;
           created_at?: string;
           updated_at?: string;
+          drop_requested_by?: string | null;
+          drop_reason?: string | null;
+          drop_requested_at?: string | null;
+          original_user_id?: string | null;
         };
         Relationships: [];
       };
@@ -661,6 +676,236 @@ export type Database = {
         };
         Relationships: [];
       };
+      shift_claim: {
+        Row: {
+          id: string;
+          business_id: string;
+          shift_id: string;
+          claimant_user_id: string;
+          outcome: Database["public"]["Enums"]["claim_outcome"];
+          created_at: string;
+          decided_at: string | null;
+          decided_by: string | null;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          shift_id: string;
+          claimant_user_id: string;
+          outcome?: Database["public"]["Enums"]["claim_outcome"];
+          created_at?: string;
+          decided_at?: string | null;
+          decided_by?: string | null;
+        };
+        Update: {
+          id?: string;
+          business_id?: string;
+          shift_id?: string;
+          claimant_user_id?: string;
+          outcome?: Database["public"]["Enums"]["claim_outcome"];
+          created_at?: string;
+          decided_at?: string | null;
+          decided_by?: string | null;
+        };
+        Relationships: [];
+      };
+      shift_swap_event: {
+        Row: {
+          id: string;
+          business_id: string;
+          shift_id: string;
+          from_status: Database["public"]["Enums"]["shift_status"] | null;
+          to_status: Database["public"]["Enums"]["shift_status"];
+          action: string;
+          actor_user_id: string | null;
+          target_user_id: string | null;
+          note: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          shift_id: string;
+          from_status?: Database["public"]["Enums"]["shift_status"] | null;
+          to_status: Database["public"]["Enums"]["shift_status"];
+          action: string;
+          actor_user_id?: string | null;
+          target_user_id?: string | null;
+          note?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          business_id?: string;
+          shift_id?: string;
+          from_status?: Database["public"]["Enums"]["shift_status"] | null;
+          to_status?: Database["public"]["Enums"]["shift_status"];
+          action?: string;
+          actor_user_id?: string | null;
+          target_user_id?: string | null;
+          note?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      notification: {
+        Row: {
+          id: string;
+          business_id: string;
+          user_id: string;
+          event_type: string;
+          payload_json: Json;
+          channel: Database["public"]["Enums"]["notification_channel"];
+          status: Database["public"]["Enums"]["notification_status"];
+          suppressed_reason: string | null;
+          attempts: number;
+          last_error: string | null;
+          scheduled_for: string | null;
+          sent_at: string | null;
+          read_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          user_id: string;
+          event_type: string;
+          payload_json?: Json;
+          channel: Database["public"]["Enums"]["notification_channel"];
+          status?: Database["public"]["Enums"]["notification_status"];
+          suppressed_reason?: string | null;
+          attempts?: number;
+          last_error?: string | null;
+          scheduled_for?: string | null;
+          sent_at?: string | null;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          business_id?: string;
+          user_id?: string;
+          event_type?: string;
+          payload_json?: Json;
+          channel?: Database["public"]["Enums"]["notification_channel"];
+          status?: Database["public"]["Enums"]["notification_status"];
+          suppressed_reason?: string | null;
+          attempts?: number;
+          last_error?: string | null;
+          scheduled_for?: string | null;
+          sent_at?: string | null;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      notification_batch: {
+        Row: {
+          id: string;
+          business_id: string;
+          key: string;
+          window_ends_at: string;
+          sent: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          key: string;
+          window_ends_at: string;
+          sent?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          business_id?: string;
+          key?: string;
+          window_ends_at?: string;
+          sent?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      roster_change_log: {
+        Row: {
+          id: string;
+          business_id: string;
+          roster_id: string;
+          shift_id: string | null;
+          action: string;
+          before_json: Json | null;
+          after_json: Json | null;
+          changed_by_user_id: string | null;
+          changed_at: string;
+          notified: boolean;
+        };
+        // Append-only: there is no client UPDATE/DELETE policy (M11 §8), so the
+        // Update shape exists only for service_role/back-office use.
+        Insert: {
+          id?: string;
+          business_id: string;
+          roster_id: string;
+          shift_id?: string | null;
+          action: string;
+          before_json?: Json | null;
+          after_json?: Json | null;
+          changed_by_user_id?: string | null;
+          changed_at?: string;
+          notified?: boolean;
+        };
+        Update: {
+          id?: string;
+          business_id?: string;
+          roster_id?: string;
+          shift_id?: string | null;
+          action?: string;
+          before_json?: Json | null;
+          after_json?: Json | null;
+          changed_by_user_id?: string | null;
+          changed_at?: string;
+          notified?: boolean;
+        };
+        Relationships: [];
+      };
+      roster_warning: {
+        Row: {
+          id: string;
+          business_id: string;
+          roster_id: string;
+          shift_id: string | null;
+          rule: string;
+          detail: string | null;
+          acknowledged_by: string | null;
+          acknowledged_at: string | null;
+          resolved: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          roster_id: string;
+          shift_id?: string | null;
+          rule: string;
+          detail?: string | null;
+          acknowledged_by?: string | null;
+          acknowledged_at?: string | null;
+          resolved?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          business_id?: string;
+          roster_id?: string;
+          shift_id?: string | null;
+          rule?: string;
+          detail?: string | null;
+          acknowledged_by?: string | null;
+          acknowledged_at?: string | null;
+          resolved?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: { [_ in never]: never };
     Functions: {
@@ -670,6 +915,20 @@ export type Database = {
       link_current_user: {
         Args: Record<PropertyKey, never>;
         Returns: Database["public"]["Tables"]["app_user"]["Row"];
+      };
+      // M8 swap RPCs — SECURITY DEFINER; each authorises the caller explicitly.
+      request_drop: {
+        Args: { p_shift_id: string; p_reason?: string | null };
+        Returns: Database["public"]["Tables"]["shift"]["Row"];
+      };
+      claim_shift: {
+        Args: { p_shift_id: string };
+        Returns: Database["public"]["Tables"]["shift_claim"]["Row"];
+      };
+      /** The critical section (M8 §5): concurrent approvals — exactly one wins. */
+      approve_claim: {
+        Args: { p_shift_id: string; p_claim_id: string };
+        Returns: Database["public"]["Tables"]["shift"]["Row"];
       };
     };
     Enums: {
@@ -684,6 +943,9 @@ export type Database = {
       shift_origin: "auto" | "manual";
       shift_status: "assigned" | "drop_requested" | "open" | "claimed_pending";
       solve_status: "ok" | "partial" | "failed";
+      claim_outcome: "pending" | "approved" | "rejected" | "withdrawn";
+      notification_channel: "inapp" | "sms";
+      notification_status: "pending" | "sent" | "failed" | "suppressed";
     };
     CompositeTypes: { [_ in never]: never };
   };

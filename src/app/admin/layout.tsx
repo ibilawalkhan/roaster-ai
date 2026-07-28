@@ -12,6 +12,7 @@ import {
   IconHome,
   IconLogout,
   IconReceipt,
+  IconSettings,
   IconUsers,
 } from "@/components/icons";
 
@@ -22,6 +23,7 @@ const NAV = [
   { href: "/admin/employees", label: "Team", icon: IconUsers },
   { href: "/admin/availability", label: "Availability", icon: IconClock },
   { href: "/admin/costs", label: "Costs", icon: IconChart },
+  { href: "/admin/settings", label: "Settings", icon: IconSettings },
 ];
 
 export default function AdminLayout({ children }: { children: ReactNode }) {

@@ -42,6 +42,19 @@ export interface Fixtures {
   shiftDraftA: string;  // draft roster, assigned to staffA1
   shiftB: string;
   solveRunA: string;
+  // swap fixtures (M8) — an OPEN shift dropped by staffA1 with two pending claims
+  openShiftA: string;
+  claimStaffA2: string;
+  claimManagerA: string;
+  // notification fixtures (M9)
+  notifStaffA1: string;
+  notifStaffA2: string;
+  notifManagerB: string;
+  // roster audit fixtures (M6 §5)
+  changeLogA: string;
+  changeLogB: string;
+  warningA: string;
+  warningB: string;
 }
 
 export interface TestDb {
@@ -105,6 +118,16 @@ export async function setupTestDb(): Promise<TestDb> {
     shiftDraftA: randomUUID(),
     shiftB: randomUUID(),
     solveRunA: randomUUID(),
+    openShiftA: randomUUID(),
+    claimStaffA2: randomUUID(),
+    claimManagerA: randomUUID(),
+    notifStaffA1: randomUUID(),
+    notifStaffA2: randomUUID(),
+    notifManagerB: randomUUID(),
+    changeLogA: randomUUID(),
+    changeLogB: randomUUID(),
+    warningA: randomUUID(),
+    warningB: randomUUID(),
   };
 
   const q = (text: string, params: unknown[]) => db.query(text, params);
@@ -236,12 +259,15 @@ export async function setupTestDb(): Promise<TestDb> {
        (id, business_id, roster_id, roster_position_id, location_id, date, start_at, end_at, role_id, assigned_user_id, status)
      values
        ($1, $2, $3, $4, $5, '2026-08-03', '2026-08-03 06:00+00', '2026-08-03 13:00+00', $6, $7, 'assigned'),
-       ($8, $9, $10, null, $11, '2026-08-03', '2026-08-03 06:00+00', '2026-08-03 13:00+00', $12, $13, 'assigned'),
+       ($8, $9, $10, null, $11, '2026-08-06', '2026-08-06 06:00+00', '2026-08-06 13:00+00', $12, $13, 'assigned'),
        ($14, $15, $16, $17, $18, '2026-08-03', '2026-08-03 06:00+00', '2026-08-03 13:00+00', $19, $20, 'assigned')`,
     [
       // published roster A, assigned to staffA1
       fx.shiftPubA, fx.businessA, fx.rosterPubA, fx.positionA, fx.locationA, fx.roleKitchenA, fx.staffA1,
-      // draft roster A, assigned to staffA1 (must stay invisible to staff)
+      // draft roster A, assigned to staffA1 (must stay invisible to staff). On a
+      // DIFFERENT day from shiftPubA: since 0010 the database refuses to book one
+      // person into two overlapping shifts, and the draft/published visibility
+      // this fixture exists to prove has nothing to do with the times.
       fx.shiftDraftA, fx.businessA, fx.rosterDraftA, fx.locationA, fx.roleKitchenA, fx.staffA1,
       // published roster B, assigned to managerB
       fx.shiftB, fx.businessB, fx.rosterB, fx.positionB, fx.locationB, fx.roleKitchenB, fx.managerB,
@@ -251,6 +277,64 @@ export async function setupTestDb(): Promise<TestDb> {
     `insert into public.solve_run (id, business_id, roster_id, seed, time_limit, status)
      values ($1, $2, $3, 42, 15, 'ok')`,
     [fx.solveRunA, fx.businessA, fx.rosterPubA],
+  );
+
+  // Swaps (M8): an OPEN shift that staffA1 dropped. Note it is still ASSIGNED to
+  // staffA1 — the dropper stays responsible until a claim is approved (M8 §7),
+  // which is the "never silently ownerless" invariant. Two people have claimed:
+  // staffA2, and managerA (a manager who is also rostered staff — M11 §9).
+  await q(
+    `insert into public.shift
+       (id, business_id, roster_id, location_id, date, start_at, end_at, role_id,
+        assigned_user_id, status, drop_requested_by, drop_requested_at, original_user_id)
+     values ($1, $2, $3, $4, '2026-08-04', '2026-08-04 06:00+00', '2026-08-04 13:00+00',
+             $5, $6, 'open', $7, now(), $8)`,
+    [
+      fx.openShiftA, fx.businessA, fx.rosterPubA, fx.locationA,
+      fx.roleKitchenA, fx.staffA1, fx.staffA1, fx.staffA1,
+    ],
+  );
+  await q(
+    `insert into public.shift_claim (id, business_id, shift_id, claimant_user_id)
+     values ($1, $2, $3, $4), ($5, $6, $7, $8)`,
+    [
+      fx.claimStaffA2, fx.businessA, fx.openShiftA, fx.staffA2,
+      fx.claimManagerA, fx.businessA, fx.openShiftA, fx.managerA,
+    ],
+  );
+
+  // Notifications (M9): one per user across both tenants, so the isolation test
+  // has real own-user, other-user and cross-tenant rows.
+  await q(
+    `insert into public.notification (id, business_id, user_id, event_type, channel)
+     values ($1, $2, $3, 'E1', 'inapp'), ($4, $5, $6, 'E1', 'inapp'), ($7, $8, $9, 'E1', 'sms')`,
+    [
+      fx.notifStaffA1, fx.businessA, fx.staffA1,
+      fx.notifStaffA2, fx.businessA, fx.staffA2,
+      fx.notifManagerB, fx.businessB, fx.managerB,
+    ],
+  );
+
+  // Roster audit (M6 §5): a publish entry and an outstanding warning per tenant,
+  // so the audit-isolation test has real own-tenant and cross-tenant rows.
+  await q(
+    `insert into public.roster_change_log
+       (id, business_id, roster_id, action, changed_by_user_id)
+     values ($1, $2, $3, 'publish', $4), ($5, $6, $7, 'publish', $8)`,
+    [
+      fx.changeLogA, fx.businessA, fx.rosterPubA, fx.managerA,
+      fx.changeLogB, fx.businessB, fx.rosterB, fx.managerB,
+    ],
+  );
+  await q(
+    `insert into public.roster_warning (id, business_id, roster_id, shift_id, rule, detail)
+     values
+       ($1, $2, $3, $4, 'senior_coverage', 'No Senior on 20:00-22:30 Monday'),
+       ($5, $6, $7, null, 'max_hours', 'Guildford Mgr is at 41h')`,
+    [
+      fx.warningA, fx.businessA, fx.rosterPubA, fx.shiftPubA,
+      fx.warningB, fx.businessB, fx.rosterB,
+    ],
   );
 
   const asUser = async <T,>(authUserId: string, fn: (db: PGlite) => Promise<T>): Promise<T> => {

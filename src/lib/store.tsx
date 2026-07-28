@@ -70,6 +70,8 @@ export interface StoreApi {
   setMemberActive: (id: string, active: boolean) => Promise<void>;
   inviteMember: (id: string) => Promise<void>;
   updateOwnContact: (patch: { phone?: string; email?: string }) => Promise<void>;
+  /** Re-read business/locations/roles/team — used after Settings writes (M1). */
+  refresh: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -276,6 +278,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const { error } = await supabase.from("app_user").update(upd).eq("id", id);
       if (error) throw error;
       await reloadTeam();
+    },
+
+    refresh: async () => {
+      await loadAll();
     },
 
     logout: async () => {

@@ -53,6 +53,11 @@ def _parse_wall(date_str: str, hhmm: str, tz: ZoneInfo) -> int:
     return _to_epoch_min(local)
 
 
+def _next_day(date_str: str) -> str:
+    """The calendar date after ``date_str``."""
+    return (date_cls.fromisoformat(date_str) + timedelta(days=1)).isoformat()
+
+
 def _local_hhmm(epoch_min: int, tz: ZoneInfo) -> str:
     dt = (_EPOCH + timedelta(minutes=epoch_min)).astimezone(tz)
     return dt.strftime("%H:%M")
@@ -191,26 +196,41 @@ def _merge_intervals(raw: list[Interval]) -> tuple[Interval, ...]:
     return tuple(merged)
 
 
+# "23:59" is the universal end-of-day sentinel in availability data. Taken
+# literally it leaves a one-minute hole at midnight, which would wrongly rule
+# somebody out of an overnight shift and would stop two consecutive all-day
+# windows merging into one continuous run. Treat it as midnight.
+_END_OF_DAY = "23:59"
+
+
+def _window_bounds(date_str: str, from_hhmm: str, to_hhmm: str, tz: ZoneInfo) -> Interval:
+    """Resolve a business-local window, rolling past midnight where needed.
+
+    The end is resolved against the **next calendar date**, not by adding 1440
+    minutes, so a window spanning a DST change is the real elapsed 7 or 9 hours
+    (M5 §10) rather than always 8.
+    """
+    start = _parse_wall(date_str, from_hhmm, tz)
+    if to_hhmm == _END_OF_DAY:
+        end = _parse_wall(_next_day(date_str), "00:00", tz)
+    else:
+        end = _parse_wall(date_str, to_hhmm, tz)
+        if end <= start:  # overnight / 24-hour day → one continuous run
+            end = _parse_wall(_next_day(date_str), to_hhmm, tz)
+    return Interval(start, end)
+
+
 def _availability_intervals(entries: list[dict], tz: ZoneInfo) -> tuple[Interval, ...]:
-    raw: list[Interval] = []
-    for a in entries or []:
-        start = _parse_wall(a["date"], a["from"], tz)
-        end = _parse_wall(a["date"], a["to"], tz)
-        if end <= start:  # crosses midnight → roll the end into the next day
-            end += 24 * 60
-        raw.append(Interval(start, end))
+    raw = [
+        _window_bounds(a["date"], a["from"], a["to"], tz) for a in entries or []
+    ]
     return _merge_intervals(raw)
 
 
 def _open_windows(entries: list[dict], tz: ZoneInfo) -> tuple[Interval, ...]:
-    windows: list[Interval] = []
-    for o in entries or []:
-        start = _parse_wall(o["date"], o["from"], tz)
-        end = _parse_wall(o["date"], o["to"], tz)
-        if end <= start:  # overnight / 24h day → one continuous run
-            end += 24 * 60
-        windows.append(Interval(start, end))
-    return tuple(windows)
+    return tuple(
+        _window_bounds(o["date"], o["from"], o["to"], tz) for o in entries or []
+    )
 
 
 def build_context(request: dict) -> Context:

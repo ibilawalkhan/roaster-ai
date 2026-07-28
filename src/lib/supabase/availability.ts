@@ -39,6 +39,26 @@ export async function fetchBusinessPatterns(): Promise<PatternRow[]> {
   return data ?? [];
 }
 
+/**
+ * All exceptions in the business inside a date window (managers only, by RLS).
+ * The roster generator needs every person's exceptions for the period so
+ * availability can be pre-resolved once, in one place (M5 §4).
+ */
+export async function fetchBusinessExceptions(
+  fromISO: string,
+  toISO: string,
+): Promise<ExceptionRow[]> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("availability_exception")
+    .select("*")
+    .gte("date", fromISO)
+    .lte("date", toISO)
+    .order("date");
+  if (error) throw error;
+  return data ?? [];
+}
+
 export async function fetchTradingHours(): Promise<TradingHoursRow[]> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase.from("trading_hours").select("*");
