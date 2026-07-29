@@ -11,7 +11,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { Avatar, Badge, Button, Card } from "@/components/ui";
+import { Avatar, Badge, Button, Card, Textarea } from "@/components/ui";
 import { IconChevronLeft, IconPin, IconUsers } from "@/components/icons";
 import { useStore } from "@/lib/store";
 import {
@@ -19,6 +19,15 @@ import {
   fetchShiftById,
   type ColleagueOnShift,
 } from "@/lib/supabase/my-shifts";
+import { requestDrop } from "@/lib/supabase/swaps";
+import { MANAGERS, notify } from "@/lib/notify";
+import { shiftWhen } from "@/lib/notify/labels";
+import {
+  dropWindow,
+  staffStatusHeadline,
+  STILL_ROSTERED_NOTICE,
+  type DropWindow,
+} from "@/lib/domain/swaps";
 import {
   calendarLabel,
   describeShiftDays,
@@ -42,7 +51,7 @@ export default function ShiftDetail() {
   const raw = params?.id;
   const shiftId = typeof raw === "string" ? raw : Array.isArray(raw) ? (raw[0] ?? "") : "";
 
-  const { me, business, roles, locations } = useStore();
+  const { me, business, roles, locations, session } = useStore();
   const timezone = business?.timezone ?? "Australia/Sydney";
 
   const [shift, setShift] = useState<MyShift | null>(null);
@@ -51,6 +60,20 @@ export default function ShiftDetail() {
 
   const [colleagues, setColleagues] = useState<ColleagueOnShift[] | null>(null);
   const [colleaguesError, setColleaguesError] = useState<string | null>(null);
+
+  // ---- M8 §3.1: "I can't make this shift" ----
+  const [dropOpen, setDropOpen] = useState(false);
+  const [dropReason, setDropReason] = useState("");
+  const [dropping, setDropping] = useState(false);
+  const [dropError, setDropError] = useState<string | null>(null);
+
+  // A slow tick keeps the 4-hour cutoff honest on a phone left open in a pocket:
+  // a screen opened at 5 hours out must not still offer the button at 3.
+  const [now, setNow] = useState<Date>(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   const load = useCallback(async () => {
     if (!shiftId) {
@@ -90,6 +113,55 @@ export default function ShiftDetail() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
+
+  /**
+   * Ask the manager for cover (M8 §3.1). The transition itself is the
+   * `request_drop` RPC — status, audit event and "the dropper stays responsible"
+   * all live in the database. Success is reported ONLY after the call resolves
+   * and the shift has been re-read, so this screen can never show "cover
+   * requested" for a request the server never took.
+   */
+  const submitDrop = async () => {
+    if (!shift) return;
+    setDropping(true);
+    setDropError(null);
+    try {
+      await requestDrop(shift.id, dropReason);
+
+      // M9 E6 — MANAGER ONLY. Never broadcast to the team: the manager is the
+      // gate (M8 §1), and nobody else learns this shift is in trouble until the
+      // manager chooses to open it. `MANAGERS` is resolved server-side because
+      // staff cannot (and must not) read the team list.
+      //
+      // Enqueued AFTER the RPC has confirmed, and `void`-ed: notify() cannot
+      // throw, so a notification failure can never undo the request the person
+      // has just been told went through (CLAUDE.md rule 7).
+      if (session.businessId) {
+        void notify({
+          event: "E6",
+          businessId: session.businessId,
+          timezone,
+          recipients: MANAGERS,
+          payload: {
+            shiftId: shift.id,
+            when: shiftWhen(shift.startAt, timezone),
+            staffName: me?.name ?? "A staff member",
+            reason: dropReason.trim() ? dropReason.trim() : null,
+          },
+        });
+      }
+
+      const fresh = await fetchShiftById(shift.id);
+      if (fresh) setShift(fresh);
+      setDropOpen(false);
+      setDropReason("");
+    } catch (e) {
+      // SwapError already carries the sentence to show (M8 §5).
+      setDropError(errorText(e, "Couldn't send that request. Nothing was sent — try again."));
+    } finally {
+      setDropping(false);
+    }
+  };
 
   const back = (
     <Link
@@ -256,26 +328,168 @@ export default function ShiftDetail() {
         </Card>
       </section>
 
-      {/*
-        ---- primary action: drop this shift ----
-        SEAM FOR M8 (shift swaps). The whole drop/claim workflow — the
-        `request_drop` RPC, the state machine and the manager approval critical
-        section — belongs to Module 8 and is being built separately. This button
-        is present so the screen's shape is final, and DISABLED so it can never
-        report a success the server did not confirm (M7 §5). To wire it up:
-        replace the disabled button with a confirm sheet that calls
-        supabase.rpc("request_drop", { p_shift_id: shift.id }) and only tells the
-        user it worked once that call resolves.
-      */}
-      <section className="mt-6">
-        <Button size="lg" variant="outline" className="w-full" disabled aria-describedby="drop-soon">
-          I can&rsquo;t make this shift
-        </Button>
-        <p id="drop-soon" className="mt-2 text-center text-[12px] text-ink-faint">
-          Coming soon. For now, tell your manager directly.
-        </p>
-      </section>
+      {/* ---- primary action: ask for cover (M8 §3.1) ---- */}
+      <DropSection
+        status={shift.status}
+        window={dropWindow(shift.startAt, now)}
+        open={dropOpen}
+        reason={dropReason}
+        busy={dropping}
+        error={dropError}
+        onOpen={() => {
+          setDropError(null);
+          setDropOpen(true);
+        }}
+        onCancel={() => {
+          setDropOpen(false);
+          setDropError(null);
+        }}
+        onReason={setDropReason}
+        onConfirm={() => void submitDrop()}
+      />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Drop / cover request (M8 §3.1)
+//
+// The state machine lives in the database; this only renders which of the four
+// situations the staff member is in:
+//   already requested → say so, and say they are STILL ROSTERED;
+//   inside the cutoff → tell them to phone, don't offer a button that can't help;
+//   confirming        → optional short reason, then confirm;
+//   otherwise         → the button.
+// ---------------------------------------------------------------------------
+
+function DropSection({
+  status,
+  window: dropWin,
+  open,
+  reason,
+  busy,
+  error,
+  onOpen,
+  onCancel,
+  onReason,
+  onConfirm,
+}: {
+  status: MyShift["status"];
+  window: DropWindow;
+  open: boolean;
+  reason: string;
+  busy: boolean;
+  error: string | null;
+  onOpen: () => void;
+  onCancel: () => void;
+  onReason: (value: string) => void;
+  onConfirm: () => void;
+}) {
+  const headline = staffStatusHeadline(status);
+
+  // ---- a request is already in flight ----
+  if (headline) {
+    return (
+      <section className="mt-6">
+        <Card className="border-saffron/40 bg-saffron-soft/50 p-5">
+          <p className="text-[15px] font-semibold text-[#8a6212]">{headline}</p>
+          {/* The sentence that prevents the most damaging misunderstanding
+              available in this product (M8 §3.1). */}
+          <p className="mt-2 text-[14px] font-medium leading-relaxed text-ink">
+            {STILL_ROSTERED_NOTICE}
+          </p>
+          <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
+            Turn up as rostered unless your manager tells you otherwise. If anything changes,
+            you&rsquo;ll see it here.
+          </p>
+        </Card>
+      </section>
+    );
+  }
+
+  // ---- too close to service to be an app problem (M8 §3.1) ----
+  if (!dropWin.canRequest) {
+    return (
+      <section className="mt-6">
+        <Card className="p-5">
+          <p className="text-[15px] font-semibold text-ink">Can&rsquo;t make this shift?</p>
+          <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">{dropWin.reason}</p>
+          <p className="mt-2 text-[13px] font-medium leading-relaxed text-ink">
+            {STILL_ROSTERED_NOTICE}
+          </p>
+        </Card>
+      </section>
+    );
+  }
+
+  // ---- the confirm sheet ----
+  if (open) {
+    return (
+      <section className="mt-6">
+        <Card className="p-5">
+          <h2 className="font-display text-lg font-semibold text-ink">Ask for cover</h2>
+          <p className="mt-1.5 text-[13px] leading-relaxed text-ink-soft">
+            This tells your manager only. Nobody else is asked unless your manager decides to open
+            the shift to the team.
+          </p>
+
+          <label
+            htmlFor="drop-reason"
+            className="mt-4 block text-[12px] font-semibold uppercase tracking-wider text-ink-soft"
+          >
+            Reason (optional)
+          </label>
+          <Textarea
+            id="drop-reason"
+            value={reason}
+            maxLength={200}
+            disabled={busy}
+            onChange={(e) => onReason(e.target.value)}
+            placeholder="e.g. family commitment"
+            className="mt-1.5"
+          />
+
+          <p className="mt-3 rounded-lg border border-saffron/40 bg-saffron-soft/50 px-3 py-2 text-[13px] font-medium leading-snug text-[#8a6212]">
+            {STILL_ROSTERED_NOTICE}
+          </p>
+
+          {error && (
+            <p
+              role="alert"
+              className="mt-3 rounded-lg border border-clay/30 bg-clay/5 px-3 py-2 text-[13px] leading-snug text-clay"
+            >
+              {error}
+            </p>
+          )}
+
+          <div className="mt-4 flex flex-col gap-2">
+            <Button size="lg" className="w-full" disabled={busy} onClick={onConfirm}>
+              {busy ? "Sending…" : "Send to my manager"}
+            </Button>
+            <Button size="lg" variant="ghost" className="w-full" disabled={busy} onClick={onCancel}>
+              Not now
+            </Button>
+          </div>
+        </Card>
+      </section>
+    );
+  }
+
+  // ---- the button ----
+  return (
+    <section className="mt-6">
+      <Button size="lg" variant="outline" className="w-full" onClick={onOpen}>
+        I can&rsquo;t make this shift
+      </Button>
+      {error && (
+        <p role="alert" className="mt-2 text-center text-[13px] text-clay">
+          {error}
+        </p>
+      )}
+      <p className="mt-2 text-center text-[12px] leading-snug text-ink-faint">
+        Your manager is told, and decides who covers it.
+      </p>
+    </section>
   );
 }
 

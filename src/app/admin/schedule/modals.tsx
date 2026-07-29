@@ -36,7 +36,12 @@ const LEVELS: Level[] = ["junior", "mid", "senior"];
 // Person picker
 // ---------------------------------------------------------------------------
 
-function PersonPicker({
+/**
+ * Exported because M8's swap screen reassigns a dropped shift with the SAME
+ * picker and the same rules (M8 §3.2 "same picker and rules as M6 §3"). Two
+ * pickers that ordered candidates differently would be two different products.
+ */
+export function PersonPicker({
   candidates,
   currentUserId,
   roleName,

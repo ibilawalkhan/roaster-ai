@@ -138,10 +138,17 @@ describe("manager positive controls", () => {
 describe("user_role visibility (M2 multi-role)", () => {
   it("manager A sees all role assignments in their business, none from B", async () => {
     const { rows } = await t.asUser(t.fx.authManagerA, (db) =>
-      db.query<{ business_id: string }>("select business_id from public.user_role"),
+      db.query<{ business_id: string; user_id: string }>(
+        "select business_id, user_id from public.user_role",
+      ),
     );
-    expect(rows).toHaveLength(3); // managerA + staffA1 + staffA2
+    // Asserted by tenancy rather than a hard count: people may hold several
+    // roles (M2 §3.2), so the number of rows is a fixture detail — that every
+    // row belongs to business A, and none to B, is the actual invariant.
+    expect(rows.length).toBeGreaterThanOrEqual(3);
     expect(rows.every((r) => r.business_id === t.fx.businessA)).toBe(true);
+    const users = new Set(rows.map((r) => r.user_id));
+    expect(users).toEqual(new Set([t.fx.managerA, t.fx.staffA1, t.fx.staffA2]));
   });
 
   it("staff A1 sees only their own role assignments", async () => {

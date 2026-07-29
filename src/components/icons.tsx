@@ -167,6 +167,14 @@ export const IconSparkle = (p: P) => (
   </Base>
 );
 
+// M9 §3 — the in-app notifications list (a bell, with an unread count beside it).
+export const IconBell = (p: P) => (
+  <Base {...p}>
+    <path d="M18 8.5a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16s-2-1.5-2-6.5Z" />
+    <path d="M13.7 19a2 2 0 0 1-3.4 0" />
+  </Base>
+);
+
 export const IconSettings = (p: P) => (
   <Base {...p}>
     <circle cx="12" cy="12" r="3" />

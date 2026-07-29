@@ -930,6 +930,29 @@ export type Database = {
         Args: { p_shift_id: string; p_claim_id: string };
         Returns: Database["public"]["Tables"]["shift"]["Row"];
       };
+      /** Atomic swap transitions (migration 0011) — state + claims + audit in one go. */
+      decline_drop: {
+        Args: { p_shift_id: string };
+        Returns: Database["public"]["Tables"]["shift"]["Row"];
+      };
+      open_shift_to_team: {
+        Args: { p_shift_id: string };
+        Returns: Database["public"]["Tables"]["shift"]["Row"];
+      };
+      cancel_open_shift: {
+        Args: { p_shift_id: string };
+        Returns: Database["public"]["Tables"]["shift"]["Row"];
+      };
+      /** Direct reassignment (migration 0012) — assign + reject claims + audit atomically. */
+      reassign_shift: {
+        Args: { p_shift_id: string; p_user_id: string };
+        Returns: Database["public"]["Tables"]["shift"]["Row"];
+      };
+      /** Colleagues on an overlapping shift — name and job role ONLY (M7 §3.2). */
+      colleagues_on_shift: {
+        Args: { p_shift_id: string };
+        Returns: { user_id: string; name: string; role_id: string }[];
+      };
     };
     Enums: {
       subscription_status: "trial" | "active" | "past_due" | "suspended";

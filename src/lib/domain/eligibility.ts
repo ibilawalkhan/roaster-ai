@@ -65,6 +65,7 @@ export type EligibilityRule =
   | "inactive"
   | "role"
   | "overlap"
+  | "location"
   // WARN — policy the manager may override
   | "availability"
   | "max_hours"
@@ -118,6 +119,14 @@ export interface EligibilityTarget {
   roleId: string;
   breakMinutes?: number;
   /**
+   * Where the work is (H9). OPTIONAL: when omitted the location rule is not
+   * checked at all, which is what the M6 roster screen wants — it is already
+   * editing within one business's roster and has never offered a cross-location
+   * warning. M8 §4 needs it, because an open shift must not be offered to
+   * someone who doesn't work at that site.
+   */
+  locationId?: string | null;
+  /**
    * The shift currently occupying this position, if any. Excluded from the
    * overlap and hours maths so editing a shift doesn't collide with itself.
    */
@@ -145,6 +154,8 @@ export interface EligibilityContext {
   shifts: EligibilityShift[];
   /** roleId → display name, for messages the manager can read. */
   roleNames: Record<string, string>;
+  /** locationId → display name. Optional; only the H9 message uses it. */
+  locationNames?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -204,7 +215,16 @@ export function checkEligibility(
   target: EligibilityTarget,
   context: EligibilityContext,
 ): EligibilityResult {
-  const { timezone, rosterStart, rule, availability, tradingHours, shifts, roleNames } = context;
+  const {
+    timezone,
+    rosterStart,
+    rule,
+    availability,
+    tradingHours,
+    shifts,
+    roleNames,
+    locationNames,
+  } = context;
   const blocks: EligibilityIssue[] = [];
   const warnings: EligibilityIssue[] = [];
 
@@ -245,7 +265,28 @@ export function checkEligibility(
     });
   }
 
-  // ---- BLOCK 3: overlap (H3) — nobody is in two places at once ----
+  // ---- BLOCK 3: location (H9) ----
+  // Only checked when the caller says where the work is. Someone with no home
+  // location, or who is marked as able to work elsewhere, is never blocked —
+  // this catches exactly the person tied to one site being offered another's
+  // shift, which M8 §4 lists as a must-pass before a shift is even shown.
+  if (
+    target.locationId &&
+    member.homeLocationId &&
+    member.homeLocationId !== target.locationId &&
+    !member.canWorkOtherLocations
+  ) {
+    const locationName = locationNames?.[target.locationId] ?? "that location";
+    blocks.push({
+      rule: "location",
+      severity: "block",
+      message: `${name} isn't set up to work at ${locationName}.`,
+      short: "Different location",
+      persistedRule: null,
+    });
+  }
+
+  // ---- BLOCK 4: overlap (H3) — nobody is in two places at once ----
   const clash = mine.find((s) => overlaps(target.startUtc, target.endUtc, s.startUtc, s.endUtc));
   if (clash) {
     blocks.push({

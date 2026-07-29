@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Supabase Edge Functions are Deno, not Next.js: remote URL imports and the
+    // `Deno` global are unresolvable here. They are type-checked and run by the
+    // Supabase/Deno toolchain instead (see supabase/functions/*/README.md).
+    "supabase/functions/**",
   ]),
 ]);
 

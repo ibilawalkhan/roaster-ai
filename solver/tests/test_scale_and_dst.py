@@ -216,7 +216,22 @@ def test_target_scale_solves_in_under_two_seconds() -> None:
 
 
 def test_lambda_direct_invocation(simple_request: dict) -> None:
-    assert handler(simple_request) == solve(simple_request)
+    """The Lambda entry point must return exactly what solve() returns.
+
+    `stats.solve_seconds` is wall-clock elapsed time and so differs between any
+    two invocations — comparing it made this test flaky (it passed only when the
+    two runs happened to round to the same value). Everything that is supposed
+    to be deterministic is compared; the timing is asserted as a shape instead.
+    """
+    via_handler = handler(simple_request)
+    direct = solve(simple_request)
+
+    def without_timing(response: dict) -> dict:
+        stats = {k: v for k, v in response["stats"].items() if k != "solve_seconds"}
+        return {**response, "stats": stats}
+
+    assert without_timing(via_handler) == without_timing(direct)
+    assert isinstance(via_handler["stats"]["solve_seconds"], (int, float))
 
 
 def test_lambda_proxy_invocation(simple_request: dict) -> None:

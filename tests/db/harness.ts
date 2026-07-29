@@ -197,6 +197,15 @@ export async function setupTestDb(): Promise<TestDb> {
     );
   }
 
+  // Ahmed (staffA2) also works Kitchen. Holding several roles is normal (M2
+  // §3.2) and it makes the swap fixtures reachable by the app: since migration
+  // 0012 the database enforces role capability on claim_shift, so a claimant
+  // who does not hold the shift's role is correctly refused.
+  await q(
+    "insert into public.user_role (business_id, user_id, role_id) values ($1, $2, $3)",
+    [fx.businessA, fx.staffA2, fx.roleKitchenA],
+  );
+
   // Availability (M3): patterns for A1 (limited), A2 (day off), B manager; an
   // exception for A1 — so isolation tests have real cross-user/tenant rows.
   await q(

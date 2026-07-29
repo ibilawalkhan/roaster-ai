@@ -179,6 +179,62 @@ describe("checkEligibility — BLOCK: physically impossible, never overridable",
   });
 });
 
+// The location rule (H9) exists for M8 §4: an open shift must not be offered to
+// someone who doesn't work at that site. It is OPT-IN — the M6 roster screen
+// passes no locationId and must keep behaving exactly as it did.
+describe("checkEligibility — BLOCK: location (H9)", () => {
+  const OTHER = "loc-2";
+
+  it("is not checked at all when the caller gives no location", () => {
+    const r = checkEligibility(
+      member({ homeLocationId: LOC, canWorkOtherLocations: false }),
+      target(),
+      context(),
+    );
+    expect(rules(r.blocks)).not.toContain("location");
+    expect(r.blocked).toBe(false);
+  });
+
+  it("blocks someone tied to another site, naming the location", () => {
+    const r = checkEligibility(
+      member({ homeLocationId: LOC, canWorkOtherLocations: false }),
+      target({ locationId: OTHER }),
+      context({ locationNames: { [OTHER]: "Guildford" } }),
+    );
+    expect(r.blocked).toBe(true);
+    expect(rules(r.blocks)).toContain("location");
+    expect(r.blocks[0].message).toBe("Bilal isn't set up to work at Guildford.");
+  });
+
+  it("allows their own home location", () => {
+    const r = checkEligibility(member(), target({ locationId: LOC }), context());
+    expect(rules(r.blocks)).not.toContain("location");
+  });
+
+  it("allows anyone marked as able to work other locations", () => {
+    const r = checkEligibility(
+      member({ canWorkOtherLocations: true }),
+      target({ locationId: OTHER }),
+      context(),
+    );
+    expect(rules(r.blocks)).not.toContain("location");
+  });
+
+  it("allows someone with no home location — they are not tied anywhere", () => {
+    const r = checkEligibility(
+      member({ homeLocationId: null }),
+      target({ locationId: OTHER }),
+      context(),
+    );
+    expect(rules(r.blocks)).not.toContain("location");
+  });
+
+  it("falls back to plain words when the location name is unknown", () => {
+    const r = checkEligibility(member(), target({ locationId: OTHER }), context());
+    expect(r.blocks[0].message).toBe("Bilal isn't set up to work at that location.");
+  });
+});
+
 describe("checkEligibility — WARN: allowed, but named and persisted", () => {
   it("is clean when nothing is breached", () => {
     const r = checkEligibility(member(), target(), context());

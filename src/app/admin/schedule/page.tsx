@@ -105,6 +105,10 @@ import {
   zonedInstant,
 } from "@/lib/domain/timezone";
 import { roundMoney, shiftCost } from "@/lib/domain/cost";
+import { notify } from "@/lib/notify";
+import { periodWhen, shiftWhen } from "@/lib/notify/labels";
+import { planRosterPublish, publishEventFor } from "@/lib/notify/policy";
+import { recipientsFor } from "@/lib/notify/recipients";
 import {
   requestSolve,
   solveResponseSchema,
@@ -619,6 +623,47 @@ export default function SchedulePage() {
     }
   };
 
+  // ---- M9: telling people about roster changes ----
+  //
+  // "Must never be silent" (M6 §4.3) applies to a roster people can SEE. A draft
+  // is invisible to staff (migration 0006 only lets them read PUBLISHED rosters),
+  // so editing a draft notifies nobody — otherwise every keystroke of planning
+  // would text the team. `published` is therefore the gate on all of these.
+  //
+  // Each is a `void notify(...)`: notify() cannot throw, so a notification
+  // failure can never roll back an edit the manager has been shown as saved
+  // (CLAUDE.md rule 7).
+
+  /** E2/E4 — a shift this person can see has changed, or is newly theirs. */
+  const notifyShiftEvent = (
+    event: "E2" | "E4",
+    input: { shiftId: string; userId: string | null; when: string; startAt: string },
+  ): void => {
+    if (!published || !session.businessId || !input.userId) return;
+    void notify({
+      event,
+      businessId: session.businessId,
+      timezone,
+      recipients: recipientsFor(team, [input.userId]),
+      payload: { shiftId: input.shiftId, when: input.when, startAt: input.startAt },
+    });
+  };
+
+  /**
+   * E3 — a shift has been taken off somebody's roster. The shift row is gone, so
+   * the deep link is their roster for the period rather than a 404.
+   */
+  const notifyShiftRemoved = (userId: string | null, startAtISO: string): void => {
+    if (!published || !session.businessId || !userId || !roster) return;
+    void notify({
+      event: "E3",
+      businessId: session.businessId,
+      timezone,
+      recipients: recipientsFor(team, [userId]),
+      payload: { rosterId: roster.id, when: shiftWhen(startAtISO, timezone) },
+    });
+  };
+
   // ---- create / discard ----
   const onCreate = async () => {
     if (!session.businessId) return;
@@ -807,6 +852,7 @@ export default function SchedulePage() {
   const onChoosePerson = (userId: string, warnings: EligibilityIssue[]) => {
     const target = editor;
     if (!target) return;
+    const previousUserId = target.shift?.assigned_user_id ?? null;
     setEditor(null);
     void mutate(
       null,
@@ -817,6 +863,18 @@ export default function SchedulePage() {
         // The manager saved through these warnings, so they become visible flags
         // on the roster rather than a toast that fades (M6 §3.2).
         await syncShiftWarnings(ctx, saved.id, warnings);
+
+        // M9 E4 — "you were added to a shift", and E3 for whoever was taken off
+        // it. A reassignment is both, from the two people's points of view.
+        notifyShiftEvent("E4", {
+          shiftId: saved.id,
+          userId,
+          when: shiftWhen(saved.start_at, timezone),
+          startAt: saved.start_at,
+        });
+        if (previousUserId && previousUserId !== userId) {
+          notifyShiftRemoved(previousUserId, saved.start_at);
+        }
       },
       target.shift ? "Couldn't move that shift." : "Couldn't assign that shift.",
     );
@@ -844,7 +902,11 @@ export default function SchedulePage() {
     setEditor(null);
     void mutate(
       () => setShifts((prev) => prev.filter((s) => s.id !== shift.id)), // optimistic
-      (ctx) => removeAssignment(ctx, shift),
+      async (ctx) => {
+        await removeAssignment(ctx, shift);
+        // M9 E3 — never let a shift silently disappear from somebody's roster.
+        notifyShiftRemoved(shift.assigned_user_id, shift.start_at);
+      },
       "Couldn't take that person off.",
     );
   };
@@ -871,6 +933,15 @@ export default function SchedulePage() {
       null,
       async (ctx) => {
         const saved = await editShiftTimes(ctx, shift, patch);
+        // M9 E2 — their shift moved. This is the change M6 §4.3 says must never
+        // be silent, so it is enqueued before the warning bookkeeping below,
+        // which is allowed to return early.
+        notifyShiftEvent("E2", {
+          shiftId: saved.id,
+          userId: saved.assigned_user_id,
+          when: shiftWhen(saved.start_at, timezone),
+          startAt: saved.start_at,
+        });
         const member = memberInputs.find((m) => m.id === saved.assigned_user_id);
         if (!member) return;
         const result = checkEligibility(
@@ -940,9 +1011,37 @@ export default function SchedulePage() {
   const onPublish = () => {
     if (!roster) return;
     setPublishOpen(false);
+    // A REPUBLISH must not re-blast everybody (M9 §8) — the people whose shifts
+    // actually changed have already had E2/E3/E4 as each edit was made, and a
+    // second "your roster is out" for a one-shift correction is exactly the
+    // noise that trains people to ignore the real ones.
+    const firstPublication = publishEventFor(roster.published_at !== null) === "E1";
     void mutate(
       null,
-      (ctx) => publishRoster(ctx, roster).then(() => undefined),
+      async (ctx) => {
+        await publishRoster(ctx, roster);
+        if (!firstPublication || !session.businessId) return;
+        // M9 E1 — ONE message per staff member summarising their period, never
+        // one per shift (M9 §4, §9). `planRosterPublish` is what makes that
+        // structurally true: it collapses the shift list to one plan per person
+        // before anything is enqueued.
+        const businessId = session.businessId;
+        for (const plan of planRosterPublish(
+          shifts.map((s) => ({ assignedUserId: s.assigned_user_id, date: s.date })),
+        )) {
+          void notify({
+            event: "E1",
+            businessId,
+            timezone,
+            recipients: recipientsFor(team, [plan.userId]),
+            payload: {
+              rosterId: roster.id,
+              when: periodWhen(plan.firstDate, plan.lastDate),
+              shiftCount: plan.shiftCount,
+            },
+          });
+        }
+      },
       "Couldn't publish this roster.",
     );
   };
@@ -950,9 +1049,29 @@ export default function SchedulePage() {
   const onUnpublish = () => {
     if (!roster) return;
     setConfirmUnpublish(false);
+    // Captured now: after withdrawal `published` is false, and the whole point of
+    // E5 is that the people who could see the roster are told it has gone.
+    const affected = planRosterPublish(
+      shifts.map((s) => ({ assignedUserId: s.assigned_user_id, date: s.date })),
+    );
     void mutate(
       null,
-      (ctx) => unpublishRoster(ctx, roster).then(() => undefined),
+      async (ctx) => {
+        await unpublishRoster(ctx, roster);
+        if (!session.businessId) return;
+        const businessId = session.businessId;
+        // M9 E5 — disruptive and rare, so it is one message per person, not one
+        // per lost shift.
+        for (const plan of affected) {
+          void notify({
+            event: "E5",
+            businessId,
+            timezone,
+            recipients: recipientsFor(team, [plan.userId]),
+            payload: { rosterId: roster.id, when: periodWhen(plan.firstDate, plan.lastDate) },
+          });
+        }
+      },
       "Couldn't withdraw this roster.",
     );
   };

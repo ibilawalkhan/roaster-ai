@@ -114,11 +114,16 @@ describe("staff shift visibility — published vs draft (§6 #9, M11 §5.1)", ()
     expect(rows[0].status).toBe("published");
   });
 
-  it("staff A2 (not assigned) sees no shifts at all", async () => {
+  it("staff A2 (not assigned) sees no shift belonging to anyone else", async () => {
+    // Since migration 0011 a member may also see shifts with status 'open' —
+    // that is how "shifts available to cover" works (M8 §3.3). Everything else
+    // assigned to another person, and every draft, stays invisible.
     const { rows } = await t.asUser(t.fx.authStaffA2, (db) =>
-      db.query("select id from public.shift"),
+      db.query<{ id: string; status: string }>("select id, status from public.shift"),
     );
-    expect(rows).toHaveLength(0);
+    expect(rows.every((r) => r.status === "open")).toBe(true);
+    expect(rows.map((r) => r.id)).not.toContain(t.fx.shiftPubA);
+    expect(rows.map((r) => r.id)).not.toContain(t.fx.shiftDraftA);
   });
 });
 

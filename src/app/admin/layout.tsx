@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { useStore } from "@/lib/store";
 import {
+  IconArrowRight,
   IconCalendar,
   IconChart,
   IconClock,
@@ -19,6 +20,9 @@ import {
 const NAV = [
   { href: "/admin", label: "Dashboard", icon: IconHome, exact: true },
   { href: "/admin/schedule", label: "Schedule", icon: IconCalendar },
+  // M8 — the drop-request queue. Sits next to the schedule because it is the
+  // same job: deciding who is on.
+  { href: "/admin/swaps", label: "Cover", icon: IconArrowRight },
   { href: "/admin/template", label: "Template", icon: IconReceipt },
   { href: "/admin/employees", label: "Team", icon: IconUsers },
   { href: "/admin/availability", label: "Availability", icon: IconClock },
