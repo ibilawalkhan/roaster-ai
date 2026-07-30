@@ -134,7 +134,7 @@ def explain_unfilled(
     if not capable:
         entry["reason"] = slugs.NO_ELIGIBLE_PERSON
         entry["detail"] = (
-            f"Nobody can work {position.role_id} at {position.location_id} — "
+            f"Nobody can work {position.role_label} at {position.location_label} — "
             "no active staff hold that role at that location with the required "
             "level."
         )
@@ -146,7 +146,7 @@ def explain_unfilled(
             key=lambda kv: (-kv[1], constraints.check_index(kv[0]), kv[0]),
         )[0][0]
         entry["detail"] = (
-            f"{_people_count(len(capable))} can work {position.role_id}; "
+            f"{_people_count(len(capable))} can work {position.role_label}; "
             f"{_blocked_summary(counts)}."
         )
 

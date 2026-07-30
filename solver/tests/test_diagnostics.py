@@ -10,6 +10,8 @@ the contract's closed slug vocabulary.
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 from conftest import day, make_request, person, position, rules
 
 from app import constraints, slugs
@@ -238,3 +240,36 @@ def test_stats_disclose_hours_and_estimated_cost(simple_request: dict) -> None:
     assert stats["hours"] == 30.0  # 5 shifts x 6 hours
     assert stats["estimated_cost"] > 0
     assert sum(stats["hours_by_person"].values()) == stats["hours"]
+
+
+def test_detail_names_the_role_and_location_not_a_uuid(simple_request: dict) -> None:
+    """M5 §6 — a gap the manager can't read is a bug, not a staffing problem.
+
+    Regression: the first live deployment reported "Nobody can work
+    00000000-0000-0000-0000-0000000000c1", which tells a manager nothing.
+    """
+    request = deepcopy(simple_request)
+    # Label the positions, and make the roster unfillable so a gap is produced.
+    for position in request["positions"]:
+        position["role_name"] = "Kitchen"
+        position["location_name"] = "Regents Park"
+    for person in request["people"]:
+        person["roles"] = ["some-other-role"]
+
+    response = solve(request)
+
+    assert response["unfilled"], "expected at least one unfilled position"
+    for gap in response["unfilled"]:
+        assert "Kitchen" in gap["detail"]
+        assert "0000-0000" not in gap["detail"], gap["detail"]
+
+
+def test_detail_falls_back_to_ids_when_no_labels_given(simple_request: dict) -> None:
+    """Labels are optional — an older caller must still get a usable response."""
+    request = deepcopy(simple_request)
+    for person in request["people"]:
+        person["roles"] = ["some-other-role"]
+
+    response = solve(request)
+    assert response["unfilled"]
+    assert response["unfilled"][0]["detail"]  # non-empty, just less friendly

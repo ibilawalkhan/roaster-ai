@@ -40,6 +40,14 @@ export interface SolvePosition {
   date: string; // trading day the position is anchored to
   location_id: string;
   role_id: string;
+  /**
+   * Human labels, used ONLY in the solver's diagnostic text (M5 §6). Optional:
+   * the solver falls back to the ids. They matter because an unfilled position
+   * reading "Nobody can work 0000…-c1" is useless to a manager — the whole
+   * value of the gap report is that it names something he can act on.
+   */
+  role_name?: string;
+  location_name?: string;
   start: string; // ISO-8601 with offset
   end: string; // ISO-8601 with offset (next day when overnight)
   required_level: Level | null;
@@ -432,6 +440,12 @@ export interface BuildSolveRequestInput {
    * keys are used, which is what the unit tests assert against.
    */
   positionIdByKey?: Record<string, string>;
+  /**
+   * id → display name, so the solver's unfilled/gap explanations name a role
+   * and a place instead of a UUID (M5 §6). Optional; ids are used if absent.
+   */
+  roleNames?: Record<string, string>;
+  locationNames?: Record<string, string>;
 }
 
 /** Build the exact `/solve` request body. Pure — no I/O, no clock, no randomness. */
@@ -469,6 +483,12 @@ export function buildSolveRequest(input: BuildSolveRequestInput): SolveRequest {
     date: p.date,
     location_id: p.locationId,
     role_id: p.roleId,
+    // Omitted entirely when unknown, so the payload stays clean and the solver
+    // falls back to the id rather than printing "undefined".
+    ...(input.roleNames?.[p.roleId] ? { role_name: input.roleNames[p.roleId] } : {}),
+    ...(input.locationNames?.[p.locationId]
+      ? { location_name: input.locationNames[p.locationId] }
+      : {}),
     start: p.start,
     end: p.end,
     required_level: p.requiredLevel,

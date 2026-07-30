@@ -752,6 +752,10 @@ export default function SchedulePage() {
       rosterStart: roster.start_date,
       days: roster.days,
       timezone,
+      // So the solver's gap explanations read "Nobody can work Kitchen at
+      // Regents Park" rather than quoting UUIDs at the manager (M5 §6).
+      roleNames: Object.fromEntries(roles.map((r) => [r.id, r.name])),
+      locationNames: Object.fromEntries(locations.map((l) => [l.id, l.name])),
       // Built from the SEEDED positions, so `position_id` is a real row id and
       // the answers can be written straight back.
       positions: seededPositions,

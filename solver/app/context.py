@@ -99,6 +99,11 @@ class Position:
     date: str  # anchor calendar date (business local), from the request
     location_id: str
     role_id: str
+    # Human labels for diagnostics ONLY (M5 §6). Optional so an older caller
+    # still works; they fall back to the ids. A manager cannot act on a UUID —
+    # "Nobody can work 00000000-…-c1" is a bug, not a staffing message.
+    role_name: str | None
+    location_name: str | None
     required_level: str | None
     start: int  # epoch minutes (UTC)
     end: int  # epoch minutes (UTC)
@@ -106,6 +111,15 @@ class Position:
     week_index: int  # 0-based week within the roster period
     weekday: int  # 0=Sun..6=Sat, local
     idx: int  # position in the ordered positions list
+
+    @property
+    def role_label(self) -> str:
+        """Human role name when the caller supplied one, else the raw id."""
+        return self.role_name or self.role_id
+
+    @property
+    def location_label(self) -> str:
+        return self.location_name or self.location_id
 
     @property
     def duration_min(self) -> int:
@@ -257,6 +271,8 @@ def build_context(request: dict) -> Context:
                 date=p["date"],
                 location_id=p["location_id"],
                 role_id=p["role_id"],
+                role_name=p.get("role_name"),
+                location_name=p.get("location_name"),
                 required_level=p.get("required_level"),
                 start=start,
                 end=end,
