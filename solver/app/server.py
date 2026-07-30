@@ -12,6 +12,7 @@ from typing import Any
 
 from flask import Flask, jsonify, request
 
+from .auth import HEADER as AUTH_HEADER, is_authorised, unauthorised_body
 from .solve import solve
 
 app = Flask(__name__)
@@ -25,6 +26,9 @@ def health() -> Any:
 
 @app.post("/solve")
 def solve_endpoint() -> Any:
+    if not is_authorised(request.headers.get(AUTH_HEADER)):
+        return jsonify(unauthorised_body()), 401
+
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         # Mirrors the solver's own failure envelope so the app has one shape to

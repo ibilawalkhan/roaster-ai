@@ -12,7 +12,25 @@ import base64
 import json
 from typing import Any
 
+from .auth import HEADER as AUTH_HEADER, is_authorised, unauthorised_body
 from .solve import solve
+
+
+def _presented_key(event: dict) -> str | None:
+    """Read the shared-secret header, case-insensitively.
+
+    API Gateway and Function URLs lowercase header names; a direct console test
+    invocation might not. Matching case-sensitively would refuse legitimate
+    traffic depending on how it arrived.
+    """
+    headers = event.get("headers") or {}
+    if not isinstance(headers, dict):
+        return None
+    wanted = AUTH_HEADER.lower()
+    for name, value in headers.items():
+        if isinstance(name, str) and name.lower() == wanted:
+            return value if isinstance(value, str) else None
+    return None
 
 
 def _is_proxy_event(event: dict) -> bool:
@@ -38,8 +56,20 @@ def handler(event: Any, context: Any = None) -> dict[str, Any]:
         return {"status": "failed", "diagnostics": {"error": "malformed request"}}
 
     if not _is_proxy_event(event):
-        # Direct invocation: the event *is* the solver request.
+        # Direct invocation: the event *is* the solver request. Reaching Lambda
+        # directly already requires AWS IAM credentials, so the shared secret —
+        # which exists to guard a public HTTP URL — is not additionally required
+        # here. This is the path the test suite and `aws lambda invoke` use.
         return solve(event)
+
+    # Anything arriving over HTTP (Function URL / API Gateway) is public-facing
+    # and must present the shared secret.
+    if not is_authorised(_presented_key(event)):
+        return {
+            "statusCode": 401,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps(unauthorised_body()),
+        }
 
     try:
         payload = _read_body(event)

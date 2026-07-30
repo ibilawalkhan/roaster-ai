@@ -24,6 +24,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStore } from "@/lib/store";
+import { getSupabaseClient } from "@/lib/supabase/client";
 import { Badge, Button, Card } from "@/components/ui";
 import { IconSparkle, IconTrash } from "@/components/icons";
 import {
@@ -764,7 +765,11 @@ export default function SchedulePage() {
     });
 
     try {
-      const result = await requestSolve(request);
+      // The proxy authorises the caller, so it needs our session token.
+      const { data: sessionData } = await getSupabaseClient().auth.getSession();
+      const result = await requestSolve(request, {
+        accessToken: sessionData.session?.access_token ?? null,
+      });
       await applyAssignments(
         roster.id,
         result.assignments.map((a) => ({ positionId: a.position_id, userId: a.user_id })),

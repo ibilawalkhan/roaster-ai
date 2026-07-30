@@ -168,8 +168,10 @@ export interface RequestSolveOptions {
   /** Caller's cancellation (e.g. the manager navigated away). */
   signal?: AbortSignal;
   timeoutMs?: number;
-  /** Overrides NEXT_PUBLIC_SOLVER_URL — used by tests. */
+  /** Overrides the proxy endpoint — used by tests. */
   url?: string;
+  /** Caller's access token; sent as a Bearer so the proxy can authorise. */
+  accessToken?: string | null;
 }
 
 function errorName(e: unknown): string {
@@ -187,10 +189,13 @@ export async function requestSolve(
   request: SolveRequest,
   options: RequestSolveOptions = {},
 ): Promise<SolveResponse> {
-  const base = (options.url ?? process.env.NEXT_PUBLIC_SOLVER_URL ?? "").trim();
-  if (!base) throw new SolverUnavailableError("not_configured");
-
-  const endpoint = `${base.replace(/\/+$/, "")}/solve`;
+  // Always our OWN origin, never the solver directly: the solver's address and
+  // credential are server-only so it can't be hammered by anyone who opens
+  // devtools. The proxy (src/app/api/solve/route.ts) authenticates the caller,
+  // checks they're a manager, and forwards with the shared secret. A 503 from
+  // it means the solver isn't configured — the same graceful path as it being
+  // switched off entirely (M5 §10).
+  const endpoint = options.url ?? "/api/solve";
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   const controller = new AbortController();
@@ -205,12 +210,17 @@ export async function requestSolve(
   try {
     const response = await fetch(endpoint, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(options.accessToken ? { authorization: `Bearer ${options.accessToken}` } : {}),
+      },
       body: JSON.stringify(request),
       signal: controller.signal,
     });
 
     if (!response.ok) {
+      // 503 is "no solver configured" — a normal state, not a fault.
+      if (response.status === 503) throw new SolverUnavailableError("not_configured");
       throw new SolverUnavailableError("http", { status: response.status });
     }
 
