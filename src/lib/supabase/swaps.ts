@@ -78,7 +78,10 @@ export async function requestDrop(shiftId: string, reason?: string | null): Prom
   const trimmed = reason?.trim();
   const { data, error } = await supabase.rpc("request_drop", {
     p_shift_id: shiftId,
-    p_reason: trimmed ? trimmed : null,
+    // `p_reason` is declared `text default null` in SQL, so PostgREST types it
+    // as OPTIONAL rather than nullable: omitting it lets the database default
+    // apply. Passing null explicitly is a type error, and needless.
+    p_reason: trimmed ? trimmed : undefined,
   });
   if (error) throw new SwapError(error);
   return data;

@@ -17,7 +17,8 @@
     "db:stop": "supabase stop",
     "db:reset": "supabase db reset",
     "db:diff": "supabase db diff",
-    "db:migration": "supabase migration new"
+    "db:migration": "supabase migration new",
+    "db:types": "node scripts/gen-types.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.69.0",
