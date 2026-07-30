@@ -155,22 +155,39 @@ export async function markAllNotificationsRead(): Promise<void> {
  */
 export function subscribeToMyNotifications(userId: string, onInsert: () => void): () => void {
   const supabase = getSupabaseClient();
-  const channel = supabase
-    .channel(`notification:${userId}`)
-    .on(
-      "postgres_changes",
-      {
-        event: "INSERT",
-        schema: "public",
-        table: "notification",
-        filter: `user_id=eq.${userId}`,
-      },
-      () => onInsert(),
-    )
-    .subscribe();
-  return () => {
-    void supabase.removeChannel(channel);
-  };
+
+  // The topic MUST be unique per subscription. supabase-js caches channels by
+  // topic, so a fixed name hands back the channel from a previous mount — and
+  // `.on()` after `subscribe()` throws. React mounts, cleans up and remounts in
+  // development, and `removeChannel` is async, so the stale channel is still in
+  // the registry when the second mount runs. A nonce sidesteps that entirely.
+  const topic = `notification:${userId}:${Math.random().toString(36).slice(2, 10)}`;
+
+  try {
+    const channel = supabase
+      .channel(topic)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "notification",
+          filter: `user_id=eq.${userId}`,
+        },
+        () => onInsert(),
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  } catch (e) {
+    // Live updates are an enhancement, never a dependency: the list already
+    // loaded on mount and "Check again" always works. Honour that promise —
+    // a realtime fault must not take the screen down with it.
+    console.warn("Realtime notifications unavailable; falling back to manual refresh.", e);
+    return () => {};
+  }
 }
 
 // ---------------------------------------------------------------------------
