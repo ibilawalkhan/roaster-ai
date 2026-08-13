@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useStore } from "@/lib/store";
 import { Avatar } from "@/components/ui";
+import { SuspendedBanner } from "@/components/SuspendedNotice";
 import {
   IconArrowRight,
   IconBell,
@@ -98,6 +99,11 @@ export default function EmployeeLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
       )}
+
+      {/* Staff keep READ access while an account is suspended — nobody should
+          lose sight of tomorrow's shift over the owner's invoice. A quiet
+          banner, not a wall, and it doesn't hand them the billing problem. */}
+      {business?.subscriptionStatus === "suspended" && <SuspendedBanner />}
 
       <main className="flex-1 pb-24">{children}</main>
 

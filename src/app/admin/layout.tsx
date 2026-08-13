@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { useStore } from "@/lib/store";
+import { SuspendedNotice } from "@/components/SuspendedNotice";
 import {
   IconArrowRight,
   IconCalendar,
@@ -41,6 +42,13 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
   if (!hydrated || session.role !== "admin") {
     return <div className="min-h-screen bg-paper" />;
+  }
+
+  // A suspended account is read-only at the database (migration 0013), so show
+  // the manager WHY rather than letting them meet an unexplained error on every
+  // save (REQUIREMENTS §1.1). Their data is untouched and says so.
+  if (business?.subscriptionStatus === "suspended") {
+    return <SuspendedNotice businessName={business.name} />;
   }
 
   const handleLogout = () => {
