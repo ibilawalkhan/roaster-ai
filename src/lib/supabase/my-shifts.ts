@@ -298,3 +298,24 @@ export function clearCachedShifts(userId: string): void {
     // Nothing to do — the cache is best-effort by design.
   }
 }
+
+/**
+ * A person's shifts on one calendar date (M3 §5 / M9 E14).
+ *
+ * Used when someone marks themselves unavailable: the shift is NEVER removed —
+ * it stands until the manager acts — but the manager has to be told, or the
+ * roster quietly develops a hole nobody sees until service.
+ */
+export async function fetchMyShiftsOnDate(
+  userId: string,
+  date: string,
+): Promise<{ id: string; start_at: string; end_at: string }[]> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("shift")
+    .select("id, start_at, end_at")
+    .eq("assigned_user_id", userId)
+    .eq("date", date);
+  if (error) throw error;
+  return data ?? [];
+}

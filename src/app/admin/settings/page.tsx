@@ -8,6 +8,7 @@ import { TradingHoursTab } from "@/components/settings/TradingHoursTab";
 import { RolesTab } from "@/components/settings/RolesTab";
 import { RulesTab } from "@/components/settings/RulesTab";
 import { BreaksTab } from "@/components/settings/BreaksTab";
+import { NotificationsTab } from "@/components/settings/NotificationsTab";
 
 /**
  * Module 1 §4.2 — the ongoing Settings screens.
@@ -26,6 +27,7 @@ const TABS = [
   { key: "roles", label: "Roles", blurb: "The jobs your team does" },
   { key: "rules", label: "Rules", blurb: "What every roster must obey" },
   { key: "breaks", label: "Breaks", blurb: "Unpaid break by shift length" },
+  { key: "notifications", label: "Notifications", blurb: "Text messages, quiet hours and budget" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -89,6 +91,7 @@ export default function SettingsPage() {
         {tab === "roles" && <RolesTab />}
         {tab === "rules" && <RulesTab />}
         {tab === "breaks" && <BreaksTab />}
+        {tab === "notifications" && <NotificationsTab />}
       </div>
     </div>
   );

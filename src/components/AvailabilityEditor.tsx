@@ -12,6 +12,10 @@ import {
   type ExceptionRow,
 } from "@/lib/supabase/availability";
 import { formatDayLong, todayISO } from "@/lib/utils";
+import { useStore } from "@/lib/store";
+import { fetchMyShiftsOnDate } from "@/lib/supabase/my-shifts";
+import { MANAGERS, notify } from "@/lib/notify";
+import { shiftWhen } from "@/lib/notify/labels";
 
 // Display order Mon–Sun; stored day_of_week is 0=Sun..6=Sat.
 const DAYS: { dow: number; label: string }[] = [
@@ -42,7 +46,12 @@ export function AvailabilityEditor({
   businessId: string;
   editorId: string;
 }) {
+  const { team, business } = useStore();
+  const timezone = business?.timezone ?? "Australia/Sydney";
+
   const [days, setDays] = useState<Record<number, DayState>>({});
+  /** Shown when they block a date they are already rostered on (M3 §5). */
+  const [rosteredWarning, setRosteredWarning] = useState<string | null>(null);
   const [exceptions, setExceptions] = useState<ExceptionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -128,12 +137,53 @@ export function AvailabilityEditor({
         source: userId === editorId ? "staff" : "manager",
         createdBy: editorId,
       });
+      // M3 §5 / M9 E14 — marking yourself unavailable NEVER removes a shift you
+      // already hold. Availability and dropping a shift are different actions
+      // and must not be conflated. So if they're rostered that day, the shift
+      // stands and the MANAGER is told, rather than the roster silently
+      // developing a hole nobody notices until service.
+      if (!exAvailable) {
+        await alertManagerIfRostered(exDate);
+      }
+
       setExDate("");
       setExReason("");
       setExAvailable(false);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't add that date.");
+    }
+  };
+
+  /** Tell the manager when this person is rostered on a date they've just blocked. */
+  const alertManagerIfRostered = async (date: string) => {
+    try {
+      const clashes = await fetchMyShiftsOnDate(userId, date);
+      if (clashes.length === 0) return;
+
+      const staffName = team.find((m) => m.id === userId)?.name ?? "A team member";
+      for (const clash of clashes) {
+        void notify({
+          event: "E14",
+          businessId,
+          timezone,
+          recipients: MANAGERS,
+          payload: {
+            shiftId: clash.id,
+            staffUserId: userId,
+            staffName,
+            when: shiftWhen(clash.start_at, timezone),
+          },
+        });
+      }
+      setRosteredWarning(
+        clashes.length === 1
+          ? "You're rostered that day. Your shift stands until your manager confirms — use “I can't make this shift” if you need cover."
+          : `You're rostered on ${clashes.length} shifts that day. They stand until your manager confirms.`,
+      );
+    } catch {
+      // Never let the alert break the availability save: the person's own
+      // record is the thing that must land.
     }
   };
 
@@ -157,6 +207,21 @@ export function AvailabilityEditor({
         <p className="rounded-lg border border-clay/30 bg-clay/5 px-3 py-2 text-[13px] text-clay">
           {error}
         </p>
+      )}
+
+      {/* M3 §5 — blocking a date you're rostered on does NOT drop the shift.
+          Saying so plainly prevents the most damaging misunderstanding here:
+          someone assuming they're off, and not turning up. */}
+      {rosteredWarning && (
+        <div className="flex items-start gap-3 rounded-lg border border-saffron/40 bg-saffron-soft px-3 py-2.5">
+          <p className="flex-1 text-[13px] leading-snug text-[#8a6212]">{rosteredWarning}</p>
+          <button
+            onClick={() => setRosteredWarning(null)}
+            className="min-h-11 shrink-0 px-1 text-[13px] font-semibold text-[#8a6212] underline"
+          >
+            Got it
+          </button>
+        </div>
       )}
 
       {/* Weekly pattern */}

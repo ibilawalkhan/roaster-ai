@@ -12,6 +12,7 @@ import type { Business, Location, NewTeamMember, Role, TeamMember } from "./type
 import { getSupabaseClient } from "./supabase/client";
 import { normalisePhone, onAuthStateChange, signOut as authSignOut } from "./supabase/auth";
 import { mapBusiness, mapLocation, mapRole, mapTeamMember } from "./mappers";
+import { notify } from "./notify";
 import type { TablesInsert, TablesUpdate } from "./supabase/database.types";
 
 export type AccessRole = "admin" | "employee";
@@ -258,8 +259,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
 
     inviteMember: async (id) => {
-      // SMS delivery of the invite link lands with M9 (Notifications); for now
-      // this marks the record invited so the manager can track who to text.
       const supabase = getSupabaseClient();
       const { error } = await supabase
         .from("app_user")
@@ -267,6 +266,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         .eq("id", id);
       if (error) throw error;
       await reloadTeam();
+
+      // M9 E16 — the invite text. SMS-only by catalogue: there is no in-app for
+      // them yet, which is the entire point of inviting them.
+      //
+      // No invite TOKEN is minted, deliberately. Login is phone-OTP against a
+      // record the manager already created (M11 §3.2), so the link only has to
+      // reach the sign-in page — a bearer token in an SMS would be a second,
+      // weaker way in, and a security liability for no gain.
+      const member = stateRef.current.team.find((m) => m.id === id);
+      const businessName = stateRef.current.business?.name;
+      if (member && businessName) {
+        void notify({
+          event: "E16",
+          businessId: stateRef.current.session.businessId!,
+          timezone: stateRef.current.business?.timezone ?? "Australia/Sydney",
+          recipients: [{ userId: member.id }],
+          payload: { inviteToken: "", businessName },
+        });
+      }
     },
 
     updateOwnContact: async (patch) => {

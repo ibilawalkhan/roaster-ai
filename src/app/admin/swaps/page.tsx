@@ -456,10 +456,24 @@ export default function SwapsPage() {
   };
 
   const onDecline = (shift: ShiftRow) =>
-    void run(
-      () => declineDrop(shift.id).then(() => undefined),
-      "Couldn't decline that request. Nothing was changed.",
-    );
+    void run(async () => {
+      // Capture the dropper BEFORE the RPC clears drop_requested_by.
+      const dropperId = shift.drop_requested_by ?? shift.assigned_user_id;
+      await declineDrop(shift.id);
+
+      // M9 E7 — tell the dropper. In-app only by catalogue: disappointing, but
+      // it isn't urgent, and they are still rostered either way. Saying nothing
+      // would leave them believing cover is still being arranged.
+      if (dropperId) {
+        void notify({
+          event: "E7",
+          businessId: shift.business_id,
+          timezone,
+          recipients: recipientsFor(team, [dropperId]),
+          payload: { shiftId: shift.id, when: shiftWhen(shift.start_at, timezone) },
+        });
+      }
+    }, "Couldn't decline that request. Nothing was changed.");
 
   const onOpenToTeam = (shift: ShiftRow) =>
     void run(async () => {

@@ -414,6 +414,39 @@ export type Database = {
           },
         ]
       }
+      notification_setting: {
+        Row: {
+          business_id: string
+          sms_enabled: boolean
+          quiet_hours_start: string
+          quiet_hours_end: string
+          daily_sms_cap: number
+          monthly_sms_budget: number | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          business_id: string
+          sms_enabled?: boolean
+          quiet_hours_start?: string
+          quiet_hours_end?: string
+          daily_sms_cap?: number
+          monthly_sms_budget?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          business_id?: string
+          sms_enabled?: boolean
+          quiet_hours_start?: string
+          quiet_hours_end?: string
+          daily_sms_cap?: number
+          monthly_sms_budget?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       notification_batch: {
         Row: {
           business_id: string
@@ -1621,6 +1654,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      sms_used_this_month: {
+        Args: { p_business_id: string }
+        Returns: number
       }
     }
     Enums: {
