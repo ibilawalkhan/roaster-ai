@@ -183,3 +183,119 @@ export async function copyDay(
   const { error: insErr } = await supabase.from("template_slot").insert(rows);
   if (insErr) throw insErr;
 }
+
+// ---------------------------------------------------------------------------
+// M4 §4.4 — build the template from a week the restaurant actually worked
+// ---------------------------------------------------------------------------
+
+export interface PastWeekOption {
+  rosterId: string;
+  startDate: string;
+  days: number;
+  status: string;
+  shiftCount: number;
+}
+
+/**
+ * Published rosters that could seed a template, newest first.
+ *
+ * Published only, deliberately: a draft is a plan someone abandoned, and
+ * copying an abandoned plan back into the template would enshrine a mistake.
+ */
+export async function fetchPastWeeks(limit = 8): Promise<PastWeekOption[]> {
+  const supabase = getSupabaseClient();
+  const { data: rosters, error } = await supabase
+    .from("roster")
+    .select("id, start_date, days, status")
+    .eq("status", "published")
+    .order("start_date", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  if (!rosters || rosters.length === 0) return [];
+
+  const { data: shifts } = await supabase
+    .from("shift")
+    .select("roster_id")
+    .in(
+      "roster_id",
+      rosters.map((r) => r.id),
+    )
+    .not("assigned_user_id", "is", null);
+
+  const counts = new Map<string, number>();
+  for (const s of shifts ?? []) {
+    counts.set(s.roster_id, (counts.get(s.roster_id) ?? 0) + 1);
+  }
+
+  return rosters
+    .map((r) => ({
+      rosterId: r.id,
+      startDate: r.start_date,
+      days: r.days,
+      status: r.status,
+      shiftCount: counts.get(r.id) ?? 0,
+    }))
+    // A roster nobody was assigned to teaches us nothing about staffing needs.
+    .filter((r) => r.shiftCount > 0);
+}
+
+/** The filled shifts of one past roster, for conversion into slots. */
+export async function fetchWeekShifts(rosterId: string): Promise<
+  { locationId: string; roleId: string; date: string; start: string; end: string }[]
+> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("shift")
+    .select("location_id, role_id, date, start_at, end_at")
+    .eq("roster_id", rosterId)
+    .not("assigned_user_id", "is", null);
+  if (error) throw error;
+  return (data ?? []).map((s) => ({
+    locationId: s.location_id,
+    roleId: s.role_id,
+    date: s.date,
+    start: s.start_at,
+    end: s.end_at,
+  }));
+}
+
+/**
+ * Replace the template's slots with a derived set (M4 §4.4).
+ *
+ * REPLACES rather than merges: the manager chose "build from this week", and
+ * silently blending the old slots into the new ones would produce a template
+ * that matches neither. The UI confirms the destruction before calling this.
+ */
+export async function replaceTemplateSlots(
+  businessId: string,
+  templateId: string,
+  slots: readonly Omit<SlotInput, "businessId" | "templateId" | "id">[],
+): Promise<number> {
+  const supabase = getSupabaseClient();
+
+  const { error: delError } = await supabase
+    .from("template_slot")
+    .delete()
+    .eq("template_id", templateId);
+  if (delError) throw delError;
+
+  if (slots.length === 0) return 0;
+
+  const rows = slots.map((s) => ({
+    business_id: businessId,
+    template_id: templateId,
+    location_id: s.locationId,
+    day_of_week: s.dayOfWeek,
+    role_id: s.roleId,
+    start_time: s.start,
+    end_time: s.end,
+    crosses_midnight: s.end <= s.start,
+    count: s.count,
+    required_level: s.requiredLevel,
+    label: s.label,
+  }));
+
+  const { error: insError } = await supabase.from("template_slot").insert(rows);
+  if (insError) throw insError;
+  return rows.length;
+}

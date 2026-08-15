@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStore } from "@/lib/store";
 import { Badge, Button, Card, Input, Label, Modal, Select } from "@/components/ui";
-import { IconCopy, IconPlus, IconTrash } from "@/components/icons";
+import { IconCopy, IconPlus, IconTrash, IconSparkle } from "@/components/icons";
+import { BuildFromWeekModal } from "@/components/BuildFromWeekModal";
+import { replaceTemplateSlots } from "@/lib/supabase/template";
+import type { ConversionSummary } from "@/lib/domain/template-from-week";
 import { fetchTradingHours, type TradingHoursRow } from "@/lib/supabase/availability";
 import {
   copyDay,
@@ -87,6 +90,7 @@ export default function TemplatePage() {
 
   const [slotModal, setSlotModal] = useState<{ dow: number; slot?: TemplateSlotRow } | null>(null);
   const [copyModal, setCopyModal] = useState<{ dow: number } | null>(null);
+  const [buildFromWeek, setBuildFromWeek] = useState(false);
 
   const activeRoles = useMemo(() => roles.filter((r) => r.active), [roles]);
   const activeLocations = useMemo(() => locations.filter((l) => l.active), [locations]);
@@ -306,6 +310,28 @@ export default function TemplatePage() {
     }
   };
 
+  /**
+   * M4 §4.4 — replace the template with slots derived from a real week.
+   * Replaces rather than merges: blending two weeks produces a template that
+   * matches neither, and the modal states that before the manager confirms.
+   */
+  const applyDerivedSlots = async (summary: ConversionSummary) => {
+    if (!session.businessId || !templateId) return;
+    setError(null);
+    setBusy(true);
+    try {
+      await replaceTemplateSlots(session.businessId, templateId, summary.slots);
+      await reloadSlots();
+    } catch (e) {
+      // Re-read either way: the manager must never be left looking at a
+      // template that doesn't match what's stored.
+      await reloadSlots().catch(() => {});
+      throw e;
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // ---- render ----
   if (loading) {
     return (
@@ -324,6 +350,17 @@ export default function TemplatePage() {
             The staffing your restaurant needs each week — the scheduler fills these with real people.
           </p>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* M4 §4.4 — the onboarding shortcut: a restaurant with real rosters
+              should never face a blank template. */}
+          <Button
+            variant="outline"
+            className="min-h-11"
+            onClick={() => setBuildFromWeek(true)}
+            disabled={busy}
+          >
+            <IconSparkle width={15} height={15} /> Build from a past week
+          </Button>
         {activeLocations.length > 1 && (
           <div className="w-52">
             <Select value={locationId} onChange={(e) => setLocationId(e.target.value)} aria-label="Location">
@@ -335,6 +372,7 @@ export default function TemplatePage() {
             </Select>
           </div>
         )}
+        </div>
       </header>
 
       {error && (
@@ -471,6 +509,15 @@ export default function TemplatePage() {
           onClose={() => setSlotModal(null)}
           onSave={saveSlot}
           onDelete={removeSlot}
+        />
+      )}
+
+      {buildFromWeek && (
+        <BuildFromWeekModal
+          existingSlotCount={slots.length}
+          roleName={roleName}
+          onClose={() => setBuildFromWeek(false)}
+          onApply={applyDerivedSlots}
         />
       )}
 
