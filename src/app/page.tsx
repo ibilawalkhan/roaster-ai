@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useStore } from "@/lib/store";
-import { requestOtp, verifyOtp } from "@/lib/supabase/auth";
+import { requestOtp, signInWithPassword, verifyOtp } from "@/lib/supabase/auth";
 import { Button, Input, Label } from "@/components/ui";
 import { IconArrowRight, IconFlame } from "@/components/icons";
 
@@ -11,7 +11,9 @@ export default function Landing() {
   const router = useRouter();
   const { session, hydrated, error: storeError } = useStore();
 
-  const [step, setStep] = useState<"phone" | "code">("phone");
+  const [step, setStep] = useState<"phone" | "code" | "email">("phone");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -45,6 +47,18 @@ export default function Landing() {
       // On success the store loads and the redirect effect above fires.
     } catch (e) {
       setError(e instanceof Error ? e.message : "That code didn't work. Try again.");
+      setBusy(false);
+    }
+  };
+
+  const submitEmail = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await signInWithPassword(email, password);
+      // The store's auth listener loads the account; the redirect effect fires.
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "That email or password wasn't right.");
       setBusy(false);
     }
   };
@@ -95,16 +109,44 @@ export default function Landing() {
       <section className="flex flex-col justify-center px-6 py-12 sm:px-14">
         <div className="mx-auto w-full max-w-sm">
           <h2 className="font-display text-2xl font-semibold tracking-tight text-ink">
-            {step === "phone" ? "Sign in" : "Enter your code"}
+            {step === "code" ? "Enter your code" : "Sign in"}
           </h2>
           <p className="mt-1 text-ink-soft">
-            {step === "phone"
-              ? "We'll text you a one-time code."
-              : `Sent to ${phone}. Enter the 6-digit code.`}
+            {step === "phone" && "We'll text you a one-time code."}
+            {step === "code" && `Sent to ${phone}. Enter the 6-digit code.`}
+            {step === "email" && "Managers can sign in with email instead."}
           </p>
 
           <div className="mt-8 space-y-4">
-            {step === "phone" ? (
+            {step === "email" ? (
+              <>
+                <div>
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    autoComplete="username"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@restaurant.com.au"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    onKeyDown={(e) =>
+                      e.key === "Enter" && email && password && !busy && submitEmail()
+                    }
+                  />
+                </div>
+              </>
+            ) : step === "phone" ? (
               <div>
                 <Label htmlFor="phone">Mobile number</Label>
                 <Input
@@ -140,10 +182,45 @@ export default function Landing() {
               </p>
             )}
 
-            {step === "phone" ? (
-              <Button onClick={sendCode} disabled={!phone || busy} className="w-full justify-center">
-                {busy ? "Sending…" : (<>Send code <IconArrowRight width={16} height={16} /></>)}
-              </Button>
+            {step === "email" ? (
+              <div className="space-y-3">
+                <Button
+                  onClick={submitEmail}
+                  disabled={!email || !password || busy}
+                  className="w-full justify-center"
+                >
+                  {busy ? "Signing in…" : "Sign in"}
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep("phone");
+                    setPassword("");
+                    setError(null);
+                  }}
+                  className="w-full text-center text-[13px] font-medium text-ink-soft hover:text-ink"
+                >
+                  Use my mobile instead
+                </button>
+              </div>
+            ) : step === "phone" ? (
+              <div className="space-y-3">
+                <Button onClick={sendCode} disabled={!phone || busy} className="w-full justify-center">
+                  {busy ? "Sending…" : (<>Send code <IconArrowRight width={16} height={16} /></>)}
+                </Button>
+                {/* M11 §3.1 — the manager fallback. Kept quiet: staff should
+                    take the phone path, which is the one built for them. */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep("email");
+                    setError(null);
+                  }}
+                  className="w-full text-center text-[13px] font-medium text-ink-soft hover:text-ink"
+                >
+                  Manager? Sign in with email
+                </button>
+              </div>
             ) : (
               <div className="space-y-3">
                 <Button

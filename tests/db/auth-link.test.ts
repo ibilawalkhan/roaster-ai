@@ -60,7 +60,7 @@ describe("link_current_user()", () => {
     await t.db.query("insert into auth.users (id, phone) values ($1, $2)", [orphan, "61499999999"]);
     await expect(
       t.asUser(orphan, (db) => db.query("select * from public.link_current_user()")),
-    ).rejects.toThrow(/no active staff record/i);
+    ).rejects.toThrow(/isn't connected to a Rosterly account/i);
   });
 
   it("links to the caller's own business, never another", async () => {

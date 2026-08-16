@@ -40,6 +40,52 @@ export async function verifyOtp(phone: string, token: string): Promise<Session> 
   return data.session;
 }
 
+/**
+ * Manager email + password sign-in (M11 §3.1).
+ *
+ * The deliberate, spec'd fallback for owners who prefer email, whose phone
+ * changes often, or who are somewhere with no signal. Staff remain phone-OTP
+ * only: passwords get lost, reused and shared, and a kitchen team should not be
+ * asked to manage one.
+ *
+ * There is NO sign-up here, by design (M11 §3.2). An email account is attached
+ * to an `app_user` the manager already created, so an unknown address gains
+ * nothing — which removes an entire class of account-takeover and spam problem.
+ */
+export async function signInWithPassword(email: string, password: string): Promise<Session> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: email.trim().toLowerCase(),
+    password,
+  });
+  if (error) throw error;
+  if (!data.session) throw new Error("Sign-in returned no session.");
+  return data.session;
+}
+
+/**
+ * Send a password-reset link.
+ *
+ * Deliberately reports success even for an unknown address: saying "no such
+ * account" would turn this into a way to discover who your customers are.
+ */
+export async function requestPasswordReset(email: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  const redirectTo =
+    typeof window !== "undefined" ? `${window.location.origin}/reset-password` : undefined;
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+    redirectTo,
+  });
+  if (error) throw error;
+}
+
+/** Set a new password for the signed-in user (used after a reset link). */
+export async function updatePassword(password: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) throw error;
+}
+
 export async function signOut(): Promise<void> {
   const supabase = getSupabaseClient();
   const { error } = await supabase.auth.signOut();

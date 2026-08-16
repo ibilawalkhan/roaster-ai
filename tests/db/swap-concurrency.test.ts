@@ -30,14 +30,20 @@ afterAll(async () => {
  * person into two overlapping shifts, and these fixtures share a single staff
  * member. The date is irrelevant to what these tests assert.
  */
-let seedDay = 10;
+// Start well clear of the harness fixtures (which sit at +7..+14 days), so a
+// seeded shift can never collide with one and trip the overlap constraint
+// added in migration 0010.
+let seedDay = 40;
 async function seedShift(
   db: PGlite,
   fx: TestDb["fx"],
   opts: { status: string; assignedTo: string | null },
 ): Promise<string> {
   const id = randomUUID();
-  const date = `2026-08-${String(seedDay++).padStart(2, "0")}`;
+  // Always in the FUTURE: migration 0012 refuses a drop on a shift that has
+  // already started, so a hardcoded calendar date would silently rot into a
+  // failing test the moment that date passed.
+  const date = new Date(Date.now() + seedDay++ * 86_400_000).toISOString().slice(0, 10);
   await db.query(
     `insert into public.shift
        (id, business_id, roster_id, location_id, date, start_at, end_at, role_id,

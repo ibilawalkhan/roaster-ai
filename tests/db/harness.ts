@@ -130,6 +130,29 @@ export async function setupTestDb(): Promise<TestDb> {
     warningB: randomUUID(),
   };
 
+  // Fixture dates are anchored to a WEEK FROM NOW, not a hardcoded calendar
+  // date. Hardcoded dates quietly become the past, and once they do, guards
+  // like "you can't drop a shift that has already started" (migration 0012)
+  // start failing tests that have nothing to do with them.
+  const dayOffset = (n: number): string =>
+    new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+  const FIXTURE_DAY = dayOffset(7);   // rosters/shifts start here
+  const FIXTURE_DAY_3 = dayOffset(10);
+  const FIXTURE_DAY_4 = dayOffset(11);
+  const FIXTURE_EXC_DAY = dayOffset(14);
+
+  const sqlDate = (d: string) => `'${d}'`;
+  const sqlTs = (d: string, hhmm: string) => `'${d} ${hhmm}+00'`;
+  const FIXTURE_DAY_SQL = sqlDate(FIXTURE_DAY);
+  const FIXTURE_START_SQL = sqlTs(FIXTURE_DAY, "06:00");
+  const FIXTURE_END_SQL = sqlTs(FIXTURE_DAY, "13:00");
+  const FIXTURE_DAY3_SQL = sqlDate(FIXTURE_DAY_3);
+  const FIXTURE_START3_SQL = sqlTs(FIXTURE_DAY_3, "06:00");
+  const FIXTURE_END3_SQL = sqlTs(FIXTURE_DAY_3, "13:00");
+  const FIXTURE_DAY4_SQL = sqlDate(FIXTURE_DAY_4);
+  const FIXTURE_START4_SQL = sqlTs(FIXTURE_DAY_4, "06:00");
+  const FIXTURE_END4_SQL = sqlTs(FIXTURE_DAY_4, "13:00");
+
   const q = (text: string, params: unknown[]) => db.query(text, params);
 
   for (const [id, phone] of [
@@ -219,8 +242,8 @@ export async function setupTestDb(): Promise<TestDb> {
   );
   await q(
     `insert into public.availability_exception (business_id, user_id, date, is_available, source)
-     values ($1, $2, '2026-08-15', false, 'staff')`,
-    [fx.businessA, fx.staffA1],
+     values ($1, $2, $3, false, 'staff')`,
+    [fx.businessA, fx.staffA1, FIXTURE_EXC_DAY],
   );
 
   // Week templates (M4): one default template + a slot per business, so the
@@ -247,17 +270,17 @@ export async function setupTestDb(): Promise<TestDb> {
   await q(
     `insert into public.roster (id, business_id, start_date, days, status, published_at)
      values
-       ($1, $2, '2026-08-03', 7, 'published', now()),
-       ($3, $4, '2026-08-03', 7, 'draft',     null),
-       ($5, $6, '2026-08-03', 7, 'published', now())`,
+       ($1, $2, ${FIXTURE_DAY_SQL}, 7, 'published', now()),
+       ($3, $4, ${FIXTURE_DAY_SQL}, 7, 'draft',     null),
+       ($5, $6, ${FIXTURE_DAY_SQL}, 7, 'published', now())`,
     [fx.rosterPubA, fx.businessA, fx.rosterDraftA, fx.businessA, fx.rosterB, fx.businessB],
   );
   await q(
     `insert into public.roster_position
        (id, business_id, roster_id, location_id, date, role_id, start_at, end_at)
      values
-       ($1, $2, $3, $4, '2026-08-03', $5, '2026-08-03 06:00+00', '2026-08-03 13:00+00'),
-       ($6, $7, $8, $9, '2026-08-03', $10, '2026-08-03 06:00+00', '2026-08-03 13:00+00')`,
+       ($1, $2, $3, $4, ${FIXTURE_DAY_SQL}, $5, ${FIXTURE_START_SQL}, ${FIXTURE_END_SQL}),
+       ($6, $7, $8, $9, ${FIXTURE_DAY_SQL}, $10, ${FIXTURE_START_SQL}, ${FIXTURE_END_SQL})`,
     [
       fx.positionA, fx.businessA, fx.rosterPubA, fx.locationA, fx.roleKitchenA,
       fx.positionB, fx.businessB, fx.rosterB, fx.locationB, fx.roleKitchenB,
@@ -267,9 +290,9 @@ export async function setupTestDb(): Promise<TestDb> {
     `insert into public.shift
        (id, business_id, roster_id, roster_position_id, location_id, date, start_at, end_at, role_id, assigned_user_id, status)
      values
-       ($1, $2, $3, $4, $5, '2026-08-03', '2026-08-03 06:00+00', '2026-08-03 13:00+00', $6, $7, 'assigned'),
-       ($8, $9, $10, null, $11, '2026-08-06', '2026-08-06 06:00+00', '2026-08-06 13:00+00', $12, $13, 'assigned'),
-       ($14, $15, $16, $17, $18, '2026-08-03', '2026-08-03 06:00+00', '2026-08-03 13:00+00', $19, $20, 'assigned')`,
+       ($1, $2, $3, $4, $5, ${FIXTURE_DAY_SQL}, ${FIXTURE_START_SQL}, ${FIXTURE_END_SQL}, $6, $7, 'assigned'),
+       ($8, $9, $10, null, $11, ${FIXTURE_DAY3_SQL}, ${FIXTURE_START3_SQL}, ${FIXTURE_END3_SQL}, $12, $13, 'assigned'),
+       ($14, $15, $16, $17, $18, ${FIXTURE_DAY_SQL}, ${FIXTURE_START_SQL}, ${FIXTURE_END_SQL}, $19, $20, 'assigned')`,
     [
       // published roster A, assigned to staffA1
       fx.shiftPubA, fx.businessA, fx.rosterPubA, fx.positionA, fx.locationA, fx.roleKitchenA, fx.staffA1,
@@ -296,7 +319,7 @@ export async function setupTestDb(): Promise<TestDb> {
     `insert into public.shift
        (id, business_id, roster_id, location_id, date, start_at, end_at, role_id,
         assigned_user_id, status, drop_requested_by, drop_requested_at, original_user_id)
-     values ($1, $2, $3, $4, '2026-08-04', '2026-08-04 06:00+00', '2026-08-04 13:00+00',
+     values ($1, $2, $3, $4, ${FIXTURE_DAY4_SQL}, ${FIXTURE_START4_SQL}, ${FIXTURE_END4_SQL},
              $5, $6, 'open', $7, now(), $8)`,
     [
       fx.openShiftA, fx.businessA, fx.rosterPubA, fx.locationA,
