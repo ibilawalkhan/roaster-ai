@@ -174,3 +174,48 @@ describe("reassign_shift never orphans a pending claim (M8 §1)", () => {
     ).rejects.toThrow(/only a manager/i);
   });
 });
+
+describe("required_level is a MINIMUM, not an exact match (migration 0017)", () => {
+  it("lets a SENIOR cover a shift that only requires Mid", async () => {
+    // The solver has always treated the level as a floor; claim_shift used to
+    // demand an exact match, turning away the most experienced person in the
+    // building when they offered to help.
+    await resetOpenShift();
+    await t.db.query(
+      `update public.roster_position set required_level = 'mid' where id = $1`,
+      [t.fx.positionA],
+    );
+    await t.db.query(`update public.shift set roster_position_id = $2 where id = $1`, [
+      t.fx.openShiftA,
+      t.fx.positionA,
+    ]);
+    // managerA is senior and holds the Manager role; align the shift's role.
+    await t.db.query(`update public.shift set role_id = $2 where id = $1`, [
+      t.fx.openShiftA,
+      t.fx.roleMgrA,
+    ]);
+
+    const res = await t.asUser(t.fx.authManagerA, (db) =>
+      db.query("select * from public.claim_shift($1)", [t.fx.openShiftA]),
+    );
+    expect(res.rows).toHaveLength(1);
+  });
+
+  it("still refuses someone BELOW the required level", async () => {
+    await resetOpenShift();
+    await t.db.query(
+      `update public.roster_position set required_level = 'senior' where id = $1`,
+      [t.fx.positionA],
+    );
+    await t.db.query(
+      `update public.shift set roster_position_id = $2, role_id = $3 where id = $1`,
+      [t.fx.openShiftA, t.fx.positionA, t.fx.roleFohA],
+    );
+    // staffA2 is 'mid' — below the senior floor.
+    await expect(
+      t.asUser(t.fx.authStaffA2, (db) =>
+        db.query("select * from public.claim_shift($1)", [t.fx.openShiftA]),
+      ),
+    ).rejects.toThrow(/more experience/i);
+  });
+});
