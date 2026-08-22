@@ -301,7 +301,7 @@ function LocationModal({
             id="loc-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Regents Park"
+            placeholder="e.g. the suburb or street your shop is on"
             autoFocus
           />
         </div>
@@ -311,7 +311,7 @@ function LocationModal({
             id="loc-address"
             value={address}
             onChange={(e) => setAddress(e.target.value)}
-            placeholder="e.g. 12 Amy St, Regents Park NSW"
+            placeholder="Street address (optional)"
           />
           <p className="mt-1 text-[12px] text-ink-faint">Display only — nothing is sent anywhere.</p>
         </div>

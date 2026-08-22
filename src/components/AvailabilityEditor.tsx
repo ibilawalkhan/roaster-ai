@@ -95,6 +95,26 @@ export function AvailabilityEditor({
   const setDay = (dow: number, patch: Partial<DayState>) =>
     setDays((d) => ({ ...d, [dow]: { ...d[dow], ...patch } }));
 
+  /**
+   * "Available all week" — the common case, and previously seven taps plus a
+   * save. Most people ARE available most days; asking them to say so one day at
+   * a time is exactly the friction that stops availability being maintained
+   * (M3 §1: it must be almost free to keep up to date).
+   *
+   * Blank times mean "any time the shop is open", which is what shows as ✓ on
+   * the manager's grid.
+   */
+  const setAllDays = (isAvailable: boolean) => {
+    setDays((d) => {
+      const next: Record<number, DayState> = {};
+      for (const { dow } of DAYS) {
+        next[dow] = { ...d[dow], isAvailable, from: "", to: "" };
+      }
+      return next;
+    });
+    setSavedNote(null);
+  };
+
   const savePattern = async () => {
     setSaving(true);
     setError(null);
@@ -226,9 +246,27 @@ export function AvailabilityEditor({
 
       {/* Weekly pattern */}
       <Card className="overflow-hidden">
-        <div className="border-b border-line px-4 py-3">
-          <h2 className="font-display text-base font-semibold text-ink">Usual week</h2>
-          <p className="text-[12px] text-ink-faint">Tap a day off, or set the hours you can work.</p>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
+          <div>
+            <h2 className="font-display text-base font-semibold text-ink">Usual week</h2>
+            <p className="text-[12px] text-ink-faint">Tap a day off, or set the hours you can work.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setAllDays(true)}
+              className="min-h-11 rounded-lg border border-herb/40 bg-herb-soft px-3 text-[13px] font-medium text-herb"
+            >
+              Available all week
+            </button>
+            <button
+              type="button"
+              onClick={() => setAllDays(false)}
+              className="min-h-11 rounded-lg border border-line px-3 text-[13px] font-medium text-ink-soft"
+            >
+              Clear all
+            </button>
+          </div>
         </div>
         <div className="divide-y divide-line">
           {DAYS.map(({ dow, label }) => {

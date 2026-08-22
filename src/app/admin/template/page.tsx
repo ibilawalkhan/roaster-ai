@@ -32,8 +32,9 @@ import {
   type TradingDay,
 } from "@/lib/domain/template-feasibility";
 import { COST_DISCLAIMER, paidHours, roundMoney, shiftCost } from "@/lib/domain/cost";
+import { DayTimeline } from "@/components/template/DayTimeline";
 import { LEVEL_LABEL, type Level } from "@/lib/types";
-import { formatHours, formatMoney, formatTimeShort } from "@/lib/utils";
+import { accentOf, formatHours, formatMoney, formatTimeShort } from "@/lib/utils";
 
 // Display order Mon–Sun; stored day_of_week is 0=Sun..6=Sat.
 const DAYS: { dow: number; short: string; long: string }[] = [
@@ -129,11 +130,10 @@ export default function TemplatePage() {
   }, [templateId]);
 
   // ---- derived lookups ----
-  const roleShort = (id: string) => {
-    const r = roles.find((x) => x.id === id);
-    return r?.shortCode || r?.name?.slice(0, 3).toUpperCase() || "—";
-  };
+  // Day sections have room for the full role name, so the short code is no
+  // longer needed here — it exists for the narrow roster grid.
   const roleName = (id: string) => roles.find((x) => x.id === id)?.name ?? "Unknown role";
+  const roleColour = (id: string) => roles.find((x) => x.id === id)?.colour ?? "ember";
 
   const tradingMap = useMemo(() => {
     const m = new Map<string, TradingHoursRow>();
@@ -410,86 +410,180 @@ export default function TemplatePage() {
         roleName={roleName}
       />
 
-      {/* Grid */}
-      <div className="rise mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-7" style={{ animationDelay: "120ms" }}>
+      {/* ---------------------------------------------------------------
+          Day sections, not day columns.
+
+          A template is authored one day at a time — "what does Monday need?"
+          — so the day is the heading and everything sits beneath it. Seven
+          narrow columns squeezed each slot into a cramped box and made the
+          role grouping unreadable. A full-width section gives the content room
+          and lets slots sit as chips that wrap, which handles any screen width
+          without a horizontal scrollbar.
+
+          Roles are sub-headed inside the day, because the manager's next
+          question after "what does Monday need?" is always "how much Kitchen?"
+      ---------------------------------------------------------------- */}
+      <div className="rise mt-5 space-y-3" style={{ animationDelay: "120ms" }}>
         {DAYS.map((d) => {
           const t = tradingFor(d.dow);
           const closed = !t || !t.isOpen;
-          const daySlots = (slotsByDay.get(d.dow) ?? []).slice().sort((a, b) =>
-            hhmm(a.start_time).localeCompare(hhmm(b.start_time)),
-          );
           const sum = daySummary(d.dow);
+
+          // Slots grouped by role, each group ordered by start time.
+          const groups = new Map<string, TemplateSlotRow[]>();
+          for (const slot of slotsByDay.get(d.dow) ?? []) {
+            groups.set(slot.role_id, [...(groups.get(slot.role_id) ?? []), slot]);
+          }
+          const roleGroups = [...groups.entries()]
+            .map(([roleId, list]) => ({
+              roleId,
+              slots: list
+                .slice()
+                .sort((a, b) => hhmm(a.start_time).localeCompare(hhmm(b.start_time))),
+              people: list.reduce((n, x) => n + x.count, 0),
+            }))
+            .sort((a, b) => roleName(a.roleId).localeCompare(roleName(b.roleId)));
+
+          // A closed day collapses to one quiet line — seven full sections is a
+          // lot of scrolling, and a day you don't trade shouldn't claim any.
+          if (closed) {
+            return (
+              <div
+                key={d.dow}
+                className="flex flex-wrap items-center gap-3 rounded-card border border-dashed border-line px-4 py-2.5"
+              >
+                <span className="font-display text-sm font-semibold text-ink-faint">{d.long}</span>
+                <span className="text-[12px] text-ink-faint">
+                  Closed — open this day in Settings to add requirements.
+                </span>
+              </div>
+            );
+          }
+
           return (
-            <Card key={d.dow} className={`flex flex-col overflow-hidden ${closed ? "opacity-70" : ""}`}>
-              <div className="border-b border-line bg-surface-2 px-3 py-2.5">
-                <div className="flex items-baseline justify-between">
-                  <span className="font-display text-sm font-semibold text-ink">{d.short}</span>
-                  <span className="nums text-[11px] text-ink-faint">
-                    {closed ? "Closed" : t!.is24h ? "24 hours" : `${t!.opensAt}–${t!.closesAt}`}
+            <Card key={d.dow} className="overflow-hidden">
+              {/* Day header: the name, the hours you are designing against, and
+                  the totals — all visible without scrolling into the day. */}
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line bg-surface-2 px-4 py-3">
+                <div className="flex items-baseline gap-3">
+                  <h2 className="font-display text-lg font-semibold text-ink">{d.long}</h2>
+                  <span className="nums text-[12px] text-ink-soft">
+                    {t!.is24h ? "Open 24 hours" : `${t!.opensAt}–${t!.closesAt}`}
                   </span>
+                </div>
+
+                <div className="flex items-center gap-4">
+                  {sum.count > 0 && (
+                    <div className="flex items-baseline gap-3 text-[13px]">
+                      <span className="text-ink-soft">
+                        <span className="nums font-semibold text-ink">{sum.people}</span>{" "}
+                        {sum.people === 1 ? "person" : "people"}
+                      </span>
+                      <span className="nums text-ink-soft">{formatHours(sum.hours)}</span>
+                      <span className="nums font-semibold text-ink">
+                        {formatMoney(roundMoney(sum.cost))}
+                      </span>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => setCopyModal({ dow: d.dow })}
+                    disabled={sum.count === 0}
+                    className="flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-[13px] font-medium text-ink-faint transition hover:text-ember disabled:opacity-40"
+                    title="Copy this day to other days"
+                  >
+                    <IconCopy width={14} height={14} /> Copy
+                  </button>
                 </div>
               </div>
 
-              <div className="flex-1 space-y-1.5 p-2">
-                {closed ? (
-                  <p className="px-1 py-6 text-center text-[12px] text-ink-faint">
-                    Closed. Open this day in Settings to add requirements.
+              <div className="space-y-3 px-4 py-3">
+                {roleGroups.length === 0 ? (
+                  <p className="py-2 text-[13px] text-ink-faint">
+                    Nothing rostered yet on {d.long}.
                   </p>
                 ) : (
                   <>
-                    {daySlots.map((s) => (
-                      <button
-                        key={s.id}
-                        onClick={() => setSlotModal({ dow: d.dow, slot: s })}
-                        className="w-full rounded-lg border border-line bg-surface px-2.5 py-2 text-left transition hover:border-ink-faint hover:bg-surface-2"
-                      >
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="truncate text-[12px] font-semibold text-ink">
-                            {roleShort(s.role_id)}
-                            {s.count > 1 && <span className="text-ember"> ×{s.count}</span>}
-                          </span>
-                          {s.required_level && (
-                            <Badge tone="ember" className="!px-1.5 !py-0 !text-[9px]">
-                              {LEVEL_LABEL[s.required_level]}
-                            </Badge>
-                          )}
-                        </div>
-                        <p className="nums mt-0.5 text-[11px] text-ink-soft">
-                          {formatTimeShort(hhmm(s.start_time))}–{formatTimeShort(hhmm(s.end_time))}
-                          {s.crosses_midnight && <span className="text-ink-faint"> +1</span>}
-                        </p>
-                        {s.label && <p className="truncate text-[10px] text-ink-faint">{s.label}</p>}
-                      </button>
-                    ))}
-                    <button
-                      onClick={() => setSlotModal({ dow: d.dow })}
-                      className="flex min-h-11 w-full items-center justify-center gap-1 rounded-lg border border-dashed border-line-strong text-[12px] font-medium text-ink-faint transition hover:border-ember hover:text-ember"
-                    >
-                      <IconPlus width={14} height={14} /> Add
-                    </button>
+                    {/* Wide screens get the timeline: bars on a shared axis, so
+                        duration, overlap and the evening peak are visible
+                        without reading a single number. */}
+                    <div className="hidden lg:block">
+                      <DayTimeline
+                        slots={slotsByDay.get(d.dow) ?? []}
+                        trading={t!}
+                        roleName={roleName}
+                        roleColour={roleColour}
+                        onEditSlot={(slot) => setSlotModal({ dow: d.dow, slot })}
+                      />
+                    </div>
+
+                    {/* Narrow screens keep the chip list — a time axis squeezed
+                        into a phone is worse than no axis at all. */}
+                    <div className="space-y-3 lg:hidden">
+                      {roleGroups.map((g) => (
+                    <div key={g.roleId}>
+                      <div className="mb-1.5 flex items-baseline gap-2">
+                        <span
+                          className="h-2 w-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: accentOf(roleColour(g.roleId)).dot }}
+                        />
+                        <span className="text-[13px] font-semibold text-ink">
+                          {roleName(g.roleId)}
+                        </span>
+                        <span className="nums text-[12px] text-ink-faint">
+                          {g.people} {g.people === 1 ? "person" : "people"}
+                        </span>
+                      </div>
+
+                      {/* Chips wrap, so this reads at any width with no
+                          horizontal scrollbar. */}
+                      <div className="flex flex-wrap gap-2">
+                        {g.slots.map((slot) => (
+                          <button
+                            key={slot.id}
+                            onClick={() => setSlotModal({ dow: d.dow, slot })}
+                            className="flex min-h-11 items-center gap-2 rounded-xl border border-line bg-surface px-3 py-1.5 text-left transition hover:border-ember hover:bg-ember-soft/40"
+                          >
+                            <span className="nums text-[13px] font-semibold text-ink">
+                              {formatTimeShort(hhmm(slot.start_time))}–
+                              {formatTimeShort(hhmm(slot.end_time))}
+                              {slot.crosses_midnight && (
+                                <span className="text-ink-faint" title="Finishes the next day">
+                                  {" "}
+                                  +1
+                                </span>
+                              )}
+                            </span>
+                            {slot.count > 1 && (
+                              <span className="nums text-[13px] font-bold text-ember">
+                                ×{slot.count}
+                              </span>
+                            )}
+                            {slot.required_level && (
+                              <Badge tone="ember" className="!px-1.5 !py-0 !text-[9px]">
+                                {LEVEL_LABEL[slot.required_level]}
+                              </Badge>
+                            )}
+                            {slot.label && (
+                              <span className="max-w-28 truncate text-[12px] text-ink-faint">
+                                {slot.label}
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                      ))}
+                    </div>
                   </>
                 )}
-              </div>
 
-              {!closed && (
-                <div className="border-t border-line px-3 py-2 text-[11px] text-ink-soft">
-                  <div className="flex items-center justify-between">
-                    <span>{sum.people} ppl</span>
-                    <span className="nums">{formatHours(sum.hours)}</span>
-                  </div>
-                  <div className="mt-0.5 flex items-center justify-between">
-                    <span className="nums font-semibold text-ink">{formatMoney(roundMoney(sum.cost))}</span>
-                    <button
-                      onClick={() => setCopyModal({ dow: d.dow })}
-                      disabled={sum.count === 0}
-                      className="flex items-center gap-1 rounded-md px-1.5 py-1 text-ink-faint transition hover:text-ember disabled:opacity-40"
-                      title="Copy this day to other days"
-                    >
-                      <IconCopy width={13} height={13} /> Copy
-                    </button>
-                  </div>
-                </div>
-              )}
+                <button
+                  onClick={() => setSlotModal({ dow: d.dow })}
+                  className="flex min-h-11 items-center gap-1.5 rounded-xl border border-dashed border-line-strong px-3 text-[13px] font-medium text-ink-faint transition hover:border-ember hover:text-ember"
+                >
+                  <IconPlus width={15} height={15} /> Add a slot
+                </button>
+              </div>
             </Card>
           );
         })}

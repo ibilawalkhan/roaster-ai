@@ -84,7 +84,7 @@ export function BusinessTab() {
               setName(e.target.value);
               setSaved(false);
             }}
-            placeholder="e.g. Al Tazah Regents Park"
+            placeholder="Your restaurant's name"
           />
         </SettingRow>
 
