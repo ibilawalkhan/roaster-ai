@@ -1,6 +1,6 @@
 "use client";
 
-// The roster grid (M6 §2.1): staff down the side, days across the top.
+// The roster grid (M6 §2.1): role tabs across the top, staff as rows, dates as columns.
 //
 // The single most important rule on this screen: an unfilled position is a
 // CARD, never blank space. Blank space reads as "nothing needed here"; an
@@ -11,7 +11,7 @@
 // dot, not a badge. The manager should be able to see the algorithm's work
 // versus their own without the grid turning into a sticker album.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Card } from "@/components/ui";
 import { IconPin, IconPlus } from "@/components/icons";
 import type { RosterPositionRow, ShiftRow } from "@/lib/supabase/roster";
@@ -19,12 +19,18 @@ import type { EligibilityIssue } from "@/lib/domain/eligibility";
 import { elapsedHours, wallTimeIn } from "@/lib/domain/timezone";
 import { COST_DISCLAIMER, roundMoney, shiftCost } from "@/lib/domain/cost";
 import { LEVEL_LABEL } from "@/lib/types";
-import { formatDayLabel, formatHours, formatMoney } from "@/lib/utils";
+import { accentOf, formatDayLabel, formatHours, formatMoney } from "@/lib/utils";
 
 export interface GridMember {
   id: string;
   name: string;
   active: boolean;
+}
+
+export interface GridRole {
+  id: string;
+  name: string;
+  colour: string;
 }
 
 export interface RosterGridProps {
@@ -33,6 +39,7 @@ export interface RosterGridProps {
   positions: RosterPositionRow[];
   shifts: ShiftRow[];
   team: GridMember[];
+  roles: GridRole[];
   roleName: (id: string) => string;
   /** Live rule breaches per shift id, for the quiet warning marker. */
   issuesByShift: Map<string, EligibilityIssue[]>;
@@ -55,6 +62,7 @@ export function RosterGrid({
   positions,
   shifts,
   team,
+  roles,
   roleName,
   issuesByShift,
   unfilledDetail,
@@ -64,6 +72,8 @@ export function RosterGrid({
   onOpenPosition,
   onAddPosition,
 }: RosterGridProps) {
+  const [selectedRoleId, setSelectedRoleId] = useState<string>("");
+
   const positionById = useMemo(
     () => new Map(positions.map((p) => [p.id, p])),
     [positions],
@@ -74,9 +84,31 @@ export function RosterGrid({
     [shifts],
   );
 
-  const byUserDate = useMemo(() => {
+  // Roles that actually have at least one position in this roster — tab visibility.
+  const rolesWithPositions = useMemo(() => {
+    const ids = new Set(positions.map((p) => p.role_id));
+    return roles.filter((r) => ids.has(r.id));
+  }, [roles, positions]);
+
+  // Keep the selected tab pointing at a real role as data changes.
+  const effectiveRoleId = useMemo(
+    () =>
+      rolesWithPositions.find((r) => r.id === selectedRoleId)
+        ? selectedRoleId
+        : (rolesWithPositions[0]?.id ?? ""),
+    [selectedRoleId, rolesWithPositions],
+  );
+
+  // ---- role-filtered data ----
+
+  const roleShifts = useMemo(
+    () => shifts.filter((s) => s.role_id === effectiveRoleId),
+    [shifts, effectiveRoleId],
+  );
+
+  const roleByUserDate = useMemo(() => {
     const m = new Map<string, ShiftRow[]>();
-    for (const s of shifts) {
+    for (const s of roleShifts) {
       if (!s.assigned_user_id) continue;
       const key = `${s.assigned_user_id}|${s.date}`;
       const arr = m.get(key) ?? [];
@@ -84,40 +116,45 @@ export function RosterGrid({
       m.set(key, arr);
     }
     return m;
-  }, [shifts]);
+  }, [roleShifts]);
 
-  const unfilledByDate = useMemo(() => {
+  const roleUnfilledByDate = useMemo(() => {
     const m = new Map<string, RosterPositionRow[]>();
     for (const p of positions) {
+      if (p.role_id !== effectiveRoleId) continue;
       if (filledPositionIds.has(p.id)) continue;
       const arr = m.get(p.date) ?? [];
       arr.push(p);
       m.set(p.date, arr);
     }
     return m;
-  }, [positions, filledPositionIds]);
+  }, [positions, effectiveRoleId, filledPositionIds]);
 
-  const assignedIds = useMemo(
-    () => new Set(shifts.flatMap((s) => (s.assigned_user_id ? [s.assigned_user_id] : []))),
-    [shifts],
+  // Staff who have at least one shift for this role (active or otherwise).
+  const roleAssignedIds = useMemo(
+    () => new Set(roleShifts.flatMap((s) => (s.assigned_user_id ? [s.assigned_user_id] : []))),
+    [roleShifts],
   );
-  const rows = team.filter((m) => m.active || assignedIds.has(m.id));
+  const roleRows = useMemo(
+    () => team.filter((m) => roleAssignedIds.has(m.id)),
+    [team, roleAssignedIds],
+  );
 
-  const perDay = useMemo(() => {
+  const rolePerDay = useMemo(() => {
     const m = new Map<string, { hours: number; cost: number }>();
     for (const d of dates) m.set(d, { hours: 0, cost: 0 });
-    for (const s of shifts) {
+    for (const s of roleShifts) {
       const cell = m.get(s.date);
       if (!cell) continue;
       cell.hours += hoursOf(s);
       cell.cost += costOf(s);
     }
     return m;
-  }, [dates, shifts]);
+  }, [dates, roleShifts]);
 
-  const perPerson = useMemo(() => {
+  const rolePerPerson = useMemo(() => {
     const m = new Map<string, { hours: number; cost: number }>();
-    for (const s of shifts) {
+    for (const s of roleShifts) {
       if (!s.assigned_user_id) continue;
       const cell = m.get(s.assigned_user_id) ?? { hours: 0, cost: 0 };
       cell.hours += hoursOf(s);
@@ -125,9 +162,12 @@ export function RosterGrid({
       m.set(s.assigned_user_id, cell);
     }
     return m;
-  }, [shifts]);
+  }, [roleShifts]);
 
-  const totalUnfilled = positions.length - filledPositionIds.size;
+  const roleTotalUnfilled = useMemo(
+    () => Array.from(roleUnfilledByDate.values()).reduce((n, arr) => n + arr.length, 0),
+    [roleUnfilledByDate],
+  );
 
   if (positions.length === 0) {
     return (
@@ -148,6 +188,7 @@ export function RosterGrid({
 
   return (
     <Card className="rise mt-5 overflow-hidden">
+      {/* Card header */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
         <h2 className="font-display text-base font-semibold text-ink">Roster</h2>
         <button
@@ -159,6 +200,32 @@ export function RosterGrid({
         </button>
       </div>
 
+      {/* Role tab strip */}
+      <div className="flex overflow-x-auto border-b border-line bg-surface-2">
+        {rolesWithPositions.map((role) => {
+          const accent = accentOf(role.colour);
+          const isActive = effectiveRoleId === role.id;
+          return (
+            <button
+              key={role.id}
+              onClick={() => setSelectedRoleId(role.id)}
+              className={`flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-5 py-3 text-sm font-medium transition ${
+                isActive
+                  ? "border-ember text-ink"
+                  : "border-transparent text-ink-soft hover:border-line-strong hover:text-ink"
+              }`}
+            >
+              <span
+                className="h-2 w-2 shrink-0 rounded-full"
+                style={{ backgroundColor: accent.dot }}
+              />
+              {role.name}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Timetable */}
       <div className="overflow-x-auto">
         <table className="w-full min-w-[960px] border-collapse text-left">
           <thead>
@@ -167,8 +234,6 @@ export function RosterGrid({
                 Person
               </th>
               {dates.map((d) => (
-                // Coverage gaps aren't about one cell, so the health panel jumps
-                // to the day column instead.
                 <th
                   key={d}
                   id={`cell-day-${d}`}
@@ -186,83 +251,154 @@ export function RosterGrid({
           </thead>
 
           <tbody>
-            {rows.map((m) => {
-              const totals = perPerson.get(m.id) ?? { hours: 0, cost: 0 };
-              return (
-                <tr key={m.id} className="border-b border-line align-top">
-                  <th className="sticky left-0 z-10 bg-surface px-3 py-2 text-[13px] font-medium text-ink">
-                    {m.name}
-                    {!m.active && (
-                      <span className="ml-1.5 text-[11px] font-normal text-clay">inactive</span>
+            {roleRows.length === 0 && roleTotalUnfilled === 0 ? (
+              <tr>
+                <td
+                  colSpan={dates.length + 2}
+                  className="px-4 py-6 text-center text-[13px] text-ink-faint"
+                >
+                  No shifts rostered for {roleName(effectiveRoleId)} yet.
+                </td>
+              </tr>
+            ) : (
+              <>
+                {roleRows.map((m) => {
+                  const totals = rolePerPerson.get(m.id) ?? { hours: 0, cost: 0 };
+                  return (
+                    <tr key={m.id} className="border-b border-line align-top">
+                      <th className="sticky left-0 z-10 bg-surface px-3 py-2 text-[13px] font-medium text-ink">
+                        {m.name}
+                        {!m.active && (
+                          <span className="ml-1.5 text-[11px] font-normal text-clay">inactive</span>
+                        )}
+                      </th>
+
+                      {dates.map((d) => {
+                        const cell = roleByUserDate.get(`${m.id}|${d}`) ?? [];
+                        return (
+                          <td key={d} className="px-1.5 py-2">
+                            {cell.length === 0 ? (
+                              <span className="block py-2 text-center text-[12px] text-ink-faint">
+                                —
+                              </span>
+                            ) : (
+                              <div className="space-y-1">
+                                {cell.map((s) => {
+                                  const issues = issuesByShift.get(s.id) ?? [];
+                                  const focused = focusedCell === s.id;
+                                  return (
+                                    <button
+                                      key={s.id}
+                                      id={`cell-${s.id}`}
+                                      onClick={() =>
+                                        onOpenShift(
+                                          s,
+                                          s.roster_position_id
+                                            ? (positionById.get(s.roster_position_id) ?? null)
+                                            : null,
+                                        )
+                                      }
+                                      className={`block w-full min-h-11 rounded-lg border px-2 py-1.5 text-left transition hover:border-ember ${
+                                        issues.length
+                                          ? "border-saffron/60 bg-saffron-soft/40"
+                                          : "border-line bg-surface"
+                                      } ${focused ? "ring-2 ring-ember" : ""}`}
+                                    >
+                                      <span className="flex items-center justify-between gap-1">
+                                        <span className="nums truncate text-[12px] font-semibold text-ink">
+                                          {wallTimeIn(s.start_at, timezone)}–
+                                          {wallTimeIn(s.end_at, timezone)}
+                                        </span>
+                                        <span className="flex shrink-0 items-center gap-1">
+                                          {s.locked && (
+                                            <IconPin
+                                              width={11}
+                                              height={11}
+                                              aria-label="Pinned"
+                                              className="text-ink-faint"
+                                            />
+                                          )}
+                                          {s.origin === "manual" && (
+                                            <span
+                                              title="Edited by you"
+                                              className="h-1.5 w-1.5 rounded-full bg-ember"
+                                            />
+                                          )}
+                                        </span>
+                                      </span>
+                                      {s.break_minutes > 0 && (
+                                        <span className="nums block text-[11px] text-ink-faint">
+                                          {s.break_minutes}m break
+                                        </span>
+                                      )}
+                                      {issues.length > 0 && (
+                                        <span className="mt-0.5 block truncate text-[10px] text-[#8a6212]">
+                                          {issues[0].short}
+                                          {issues.length > 1 && ` +${issues.length - 1}`}
+                                        </span>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </td>
+                        );
+                      })}
+
+                      <td className="px-3 py-2 text-right">
+                        <p className="nums text-[13px] font-semibold text-ink">
+                          {formatHours(totals.hours)}
+                        </p>
+                        <p className="nums text-[11px] text-ink-faint">
+                          {formatMoney(roundMoney(totals.cost))}
+                        </p>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {/* Unfilled positions for this role — always a card, never blank. */}
+                <tr className="bg-clay/5 align-top">
+                  <th className="sticky left-0 z-10 bg-[#fbf1ed] px-3 py-2 text-[13px] font-semibold text-clay">
+                    Unfilled
+                    {roleTotalUnfilled > 0 && (
+                      <span className="nums ml-1 font-normal">({roleTotalUnfilled})</span>
                     )}
                   </th>
-
                   {dates.map((d) => {
-                    const cell = byUserDate.get(`${m.id}|${d}`) ?? [];
+                    const cell = roleUnfilledByDate.get(d) ?? [];
                     return (
                       <td key={d} className="px-1.5 py-2">
                         {cell.length === 0 ? (
-                          <span className="block py-2 text-center text-[12px] text-ink-faint">
-                            —
-                          </span>
+                          <span className="block py-2 text-center text-[12px] text-ink-faint">—</span>
                         ) : (
                           <div className="space-y-1">
-                            {cell.map((s) => {
-                              const issues = issuesByShift.get(s.id) ?? [];
-                              const focused = focusedCell === s.id;
+                            {cell.map((p) => {
+                              const why = unfilledDetail.get(p.id);
+                              const focused = focusedCell === p.id;
                               return (
                                 <button
-                                  key={s.id}
-                                  id={`cell-${s.id}`}
-                                  onClick={() =>
-                                    onOpenShift(
-                                      s,
-                                      s.roster_position_id
-                                        ? (positionById.get(s.roster_position_id) ?? null)
-                                        : null,
-                                    )
-                                  }
-                                  className={`block w-full min-h-11 rounded-lg border px-2 py-1.5 text-left transition hover:border-ember ${
-                                    issues.length
-                                      ? "border-saffron/60 bg-saffron-soft/40"
-                                      : "border-line bg-surface"
-                                  } ${focused ? "ring-2 ring-ember" : ""}`}
+                                  key={p.id}
+                                  id={`cell-${p.id}`}
+                                  onClick={() => onOpenPosition(p)}
+                                  title={why?.detail ?? "Nobody is on this shift yet."}
+                                  className={`block min-h-11 w-full rounded-lg border border-dashed border-clay/50 bg-clay/5 px-2 py-1.5 text-left transition hover:border-clay ${
+                                    focused ? "ring-2 ring-ember" : ""
+                                  }`}
                                 >
-                                  <span className="flex items-center justify-between gap-1">
-                                    <span className="truncate text-[12px] font-semibold text-ink">
-                                      {roleName(s.role_id)}
-                                    </span>
-                                    <span className="flex shrink-0 items-center gap-1">
-                                      {s.locked && (
-                                        <IconPin
-                                          width={11}
-                                          height={11}
-                                          aria-label="Pinned"
-                                          className="text-ink-faint"
-                                        />
-                                      )}
-                                      {/* Quiet marker: the manager's own edit. */}
-                                      {s.origin === "manual" && (
-                                        <span
-                                          title="Edited by you"
-                                          className="h-1.5 w-1.5 rounded-full bg-ember"
-                                        />
-                                      )}
-                                    </span>
+                                  <span className="nums block text-[12px] font-semibold text-clay">
+                                    {wallTimeIn(p.start_at, timezone)}–{wallTimeIn(p.end_at, timezone)}
                                   </span>
-                                  <span className="nums block text-[11px] text-ink-soft">
-                                    {wallTimeIn(s.start_at, timezone)}–
-                                    {wallTimeIn(s.end_at, timezone)}
-                                    {s.break_minutes > 0 && (
-                                      <span className="text-ink-faint"> · {s.break_minutes}m br</span>
-                                    )}
-                                  </span>
-                                  {issues.length > 0 && (
-                                    <span className="mt-0.5 block truncate text-[10px] text-[#8a6212]">
-                                      {issues[0].short}
-                                      {issues.length > 1 && ` +${issues.length - 1}`}
+                                  {(p.required_level || p.source === "manual") && (
+                                    <span className="block text-[11px] text-clay/80">
+                                      {p.required_level && LEVEL_LABEL[p.required_level]}
+                                      {p.source === "manual" && " one-off"}
                                     </span>
                                   )}
+                                  <span className="mt-0.5 block truncate text-[10px] leading-snug text-ink-faint">
+                                    {why?.detail ?? "Tap to fill it."}
+                                  </span>
                                 </button>
                               );
                             })}
@@ -271,74 +407,10 @@ export function RosterGrid({
                       </td>
                     );
                   })}
-
-                  <td className="px-3 py-2 text-right">
-                    <p className="nums text-[13px] font-semibold text-ink">
-                      {formatHours(totals.hours)}
-                    </p>
-                    <p className="nums text-[11px] text-ink-faint">
-                      {formatMoney(roundMoney(totals.cost))}
-                    </p>
-                  </td>
+                  <td />
                 </tr>
-              );
-            })}
-
-            {/* Unfilled positions are a ROW, not an absence. */}
-            <tr className="bg-clay/5 align-top">
-              <th className="sticky left-0 z-10 bg-[#fbf1ed] px-3 py-2 text-[13px] font-semibold text-clay">
-                Unfilled
-                {totalUnfilled > 0 && <span className="nums ml-1 font-normal">({totalUnfilled})</span>}
-              </th>
-              {dates.map((d) => {
-                const cell = unfilledByDate.get(d) ?? [];
-                return (
-                  <td key={d} className="px-1.5 py-2">
-                    {cell.length === 0 ? (
-                      <span className="block py-2 text-center text-[12px] text-ink-faint">—</span>
-                    ) : (
-                      <div className="space-y-1">
-                        {cell.map((p) => {
-                          const why = unfilledDetail.get(p.id);
-                          const focused = focusedCell === p.id;
-                          return (
-                            <button
-                              key={p.id}
-                              id={`cell-${p.id}`}
-                              onClick={() => onOpenPosition(p)}
-                              title={why?.detail ?? "Nobody is on this shift yet."}
-                              className={`block min-h-11 w-full rounded-lg border border-dashed border-clay/50 bg-clay/5 px-2 py-1.5 text-left transition hover:border-clay ${
-                                focused ? "ring-2 ring-ember" : ""
-                              }`}
-                            >
-                              <span className="truncate text-[12px] font-semibold text-clay">
-                                {roleName(p.role_id)}
-                                {p.required_level && (
-                                  <span className="ml-1 font-normal">
-                                    · {LEVEL_LABEL[p.required_level]}
-                                  </span>
-                                )}
-                                {p.source === "manual" && (
-                                  <span className="ml-1 font-normal text-ink-faint">· one-off</span>
-                                )}
-                              </span>
-                              <span className="nums block text-[11px] text-clay/80">
-                                {wallTimeIn(p.start_at, timezone)}–{wallTimeIn(p.end_at, timezone)}
-                                {" · unfilled"}
-                              </span>
-                              <span className="mt-0.5 block truncate text-[10px] leading-snug text-ink-faint">
-                                {why?.detail ?? "Tap to fill it."}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </td>
-                );
-              })}
-              <td />
-            </tr>
+              </>
+            )}
           </tbody>
 
           <tfoot>
@@ -347,7 +419,7 @@ export function RosterGrid({
                 Per day
               </th>
               {dates.map((d) => {
-                const t = perDay.get(d) ?? { hours: 0, cost: 0 };
+                const t = rolePerDay.get(d) ?? { hours: 0, cost: 0 };
                 return (
                   <td key={d} className="px-2 py-2.5">
                     <p className="nums text-[12px] font-semibold text-ink">
@@ -361,11 +433,13 @@ export function RosterGrid({
               })}
               <td className="px-3 py-2.5 text-right">
                 <p className="nums text-[13px] font-semibold text-ink">
-                  {formatHours(Array.from(perDay.values()).reduce((n, t) => n + t.hours, 0))}
+                  {formatHours(Array.from(rolePerDay.values()).reduce((n, t) => n + t.hours, 0))}
                 </p>
                 <p className="nums text-[11px] text-ink-faint">
                   {formatMoney(
-                    roundMoney(Array.from(perDay.values()).reduce((n, t) => n + t.cost, 0)),
+                    roundMoney(
+                      Array.from(rolePerDay.values()).reduce((n, t) => n + t.cost, 0),
+                    ),
                   )}
                 </p>
               </td>

@@ -385,6 +385,13 @@ export default function SchedulePage() {
     () => roles.filter((r) => r.active).map((r) => ({ id: r.id, name: r.name })),
     [roles],
   );
+  const gridRoles = useMemo(
+    () =>
+      roles
+        .filter((r) => r.active)
+        .map((r) => ({ id: r.id, name: r.name, colour: r.colour ?? "ember" })),
+    [roles],
+  );
   const roleNames = useMemo(() => {
     const m: Record<string, string> = {};
     for (const r of roles) m[r.id] = r.name;
@@ -1315,6 +1322,7 @@ export default function SchedulePage() {
             positions={positions}
             shifts={shifts}
             team={team.map((m) => ({ id: m.id, name: m.name, active: m.active }))}
+            roles={gridRoles}
             roleName={roleName}
             issuesByShift={issuesByShift}
             unfilledDetail={unfilledDetail}

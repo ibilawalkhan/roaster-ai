@@ -32,7 +32,6 @@ import {
   type TradingDay,
 } from "@/lib/domain/template-feasibility";
 import { COST_DISCLAIMER, paidHours, roundMoney, shiftCost } from "@/lib/domain/cost";
-import { DayTimeline } from "@/components/template/DayTimeline";
 import { LEVEL_LABEL, type Level } from "@/lib/types";
 import { accentOf, formatHours, formatMoney, formatTimeShort } from "@/lib/utils";
 
@@ -89,12 +88,21 @@ export default function TemplatePage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const [slotModal, setSlotModal] = useState<{ dow: number; slot?: TemplateSlotRow } | null>(null);
+  const [selectedRoleId, setSelectedRoleId] = useState<string>("");
+  const [slotModal, setSlotModal] = useState<{ dow: number; slot?: TemplateSlotRow; defaultRoleId?: string } | null>(null);
   const [copyModal, setCopyModal] = useState<{ dow: number } | null>(null);
   const [buildFromWeek, setBuildFromWeek] = useState(false);
 
   const activeRoles = useMemo(() => roles.filter((r) => r.active), [roles]);
   const activeLocations = useMemo(() => locations.filter((l) => l.active), [locations]);
+  // Keep selectedRoleId pointing at a real role even if roles list changes.
+  const effectiveRoleId = useMemo(
+    () =>
+      activeRoles.find((r) => r.id === selectedRoleId)
+        ? selectedRoleId
+        : (activeRoles[0]?.id ?? ""),
+    [selectedRoleId, activeRoles],
+  );
 
   const load = useCallback(async () => {
     if (!session.businessId) return;
@@ -176,29 +184,28 @@ export default function TemplatePage() {
     () => slots.filter((s) => s.location_id === locationId),
     [slots, locationId],
   );
-  const slotsByDay = useMemo(() => {
-    const m = new Map<number, TemplateSlotRow[]>();
+  const slotsByDayAndRole = useMemo(() => {
+    const m = new Map<string, TemplateSlotRow[]>();
     for (const s of locSlots) {
-      const arr = m.get(s.day_of_week) ?? [];
+      const key = `${s.day_of_week}:${s.role_id}`;
+      const arr = m.get(key) ?? [];
       arr.push(s);
-      m.set(s.day_of_week, arr);
+      m.set(key, arr);
     }
     return m;
   }, [locSlots]);
 
-  // ---- per-day summaries ----
-  function daySummary(dow: number) {
-    const daySlots = slotsByDay.get(dow) ?? [];
+  // ---- per-day per-role summary (used in timetable column header) ----
+  function daySummaryForRole(dow: number, roleId: string) {
+    const daySlots = slotsByDayAndRole.get(`${dow}:${roleId}`) ?? [];
     let people = 0;
     let hours = 0;
-    let cost = 0;
     for (const s of daySlots) {
       const h = paidHours({ start: hhmm(s.start_time), end: hhmm(s.end_time) });
       people += s.count;
       hours += h * s.count;
-      cost += shiftCost(h * s.count, roleAvgRate(s.role_id));
     }
-    return { people, hours, cost, count: daySlots.length };
+    return { people, hours, count: daySlots.length };
   }
 
   const weekly = useMemo(() => {
@@ -410,183 +417,169 @@ export default function TemplatePage() {
         roleName={roleName}
       />
 
-      {/* ---------------------------------------------------------------
-          Day sections, not day columns.
-
-          A template is authored one day at a time — "what does Monday need?"
-          — so the day is the heading and everything sits beneath it. Seven
-          narrow columns squeezed each slot into a cramped box and made the
-          role grouping unreadable. A full-width section gives the content room
-          and lets slots sit as chips that wrap, which handles any screen width
-          without a horizontal scrollbar.
-
-          Roles are sub-headed inside the day, because the manager's next
-          question after "what does Monday need?" is always "how much Kitchen?"
-      ---------------------------------------------------------------- */}
-      <div className="rise mt-5 space-y-3" style={{ animationDelay: "120ms" }}>
-        {DAYS.map((d) => {
-          const t = tradingFor(d.dow);
-          const closed = !t || !t.isOpen;
-          const sum = daySummary(d.dow);
-
-          // Slots grouped by role, each group ordered by start time.
-          const groups = new Map<string, TemplateSlotRow[]>();
-          for (const slot of slotsByDay.get(d.dow) ?? []) {
-            groups.set(slot.role_id, [...(groups.get(slot.role_id) ?? []), slot]);
-          }
-          const roleGroups = [...groups.entries()]
-            .map(([roleId, list]) => ({
-              roleId,
-              slots: list
-                .slice()
-                .sort((a, b) => hhmm(a.start_time).localeCompare(hhmm(b.start_time))),
-              people: list.reduce((n, x) => n + x.count, 0),
-            }))
-            .sort((a, b) => roleName(a.roleId).localeCompare(roleName(b.roleId)));
-
-          // A closed day collapses to one quiet line — seven full sections is a
-          // lot of scrolling, and a day you don't trade shouldn't claim any.
-          if (closed) {
-            return (
-              <div
-                key={d.dow}
-                className="flex flex-wrap items-center gap-3 rounded-card border border-dashed border-line px-4 py-2.5"
-              >
-                <span className="font-display text-sm font-semibold text-ink-faint">{d.long}</span>
-                <span className="text-[12px] text-ink-faint">
-                  Closed — open this day in Settings to add requirements.
-                </span>
-              </div>
-            );
-          }
-
-          return (
-            <Card key={d.dow} className="overflow-hidden">
-              {/* Day header: the name, the hours you are designing against, and
-                  the totals — all visible without scrolling into the day. */}
-              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line bg-surface-2 px-4 py-3">
-                <div className="flex items-baseline gap-3">
-                  <h2 className="font-display text-lg font-semibold text-ink">{d.long}</h2>
-                  <span className="nums text-[12px] text-ink-soft">
-                    {t!.is24h ? "Open 24 hours" : `${t!.opensAt}–${t!.closesAt}`}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-4">
-                  {sum.count > 0 && (
-                    <div className="flex items-baseline gap-3 text-[13px]">
-                      <span className="text-ink-soft">
-                        <span className="nums font-semibold text-ink">{sum.people}</span>{" "}
-                        {sum.people === 1 ? "person" : "people"}
-                      </span>
-                      <span className="nums text-ink-soft">{formatHours(sum.hours)}</span>
-                      <span className="nums font-semibold text-ink">
-                        {formatMoney(roundMoney(sum.cost))}
-                      </span>
-                    </div>
-                  )}
+      {/* Role-tab timetable — columns = days, rows = slot cards per role */}
+      <div className="rise mt-5" style={{ animationDelay: "120ms" }}>
+        {activeRoles.length === 0 ? (
+          <Card className="p-8 text-center text-sm text-ink-faint">
+            No active roles — add roles in Settings before building your template.
+          </Card>
+        ) : (
+          <Card className="overflow-hidden">
+            {/* Role tab strip */}
+            <div className="flex overflow-x-auto border-b border-line bg-surface-2">
+              {activeRoles.map((role) => {
+                const accent = accentOf(roleColour(role.id));
+                const isActive = effectiveRoleId === role.id;
+                return (
                   <button
-                    onClick={() => setCopyModal({ dow: d.dow })}
-                    disabled={sum.count === 0}
-                    className="flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-[13px] font-medium text-ink-faint transition hover:text-ember disabled:opacity-40"
-                    title="Copy this day to other days"
+                    key={role.id}
+                    onClick={() => setSelectedRoleId(role.id)}
+                    className={`flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-5 py-3 text-sm font-medium transition ${
+                      isActive
+                        ? "border-ember text-ink"
+                        : "border-transparent text-ink-soft hover:border-line-strong hover:text-ink"
+                    }`}
                   >
-                    <IconCopy width={14} height={14} /> Copy
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: accent.dot }}
+                    />
+                    {role.name}
                   </button>
-                </div>
-              </div>
+                );
+              })}
+            </div>
 
-              <div className="space-y-3 px-4 py-3">
-                {roleGroups.length === 0 ? (
-                  <p className="py-2 text-[13px] text-ink-faint">
-                    Nothing rostered yet on {d.long}.
-                  </p>
-                ) : (
-                  <>
-                    {/* Wide screens get the timeline: bars on a shared axis, so
-                        duration, overlap and the evening peak are visible
-                        without reading a single number. */}
-                    <div className="hidden lg:block">
-                      <DayTimeline
-                        slots={slotsByDay.get(d.dow) ?? []}
-                        trading={t!}
-                        roleName={roleName}
-                        roleColour={roleColour}
-                        onEditSlot={(slot) => setSlotModal({ dow: d.dow, slot })}
-                      />
-                    </div>
-
-                    {/* Narrow screens keep the chip list — a time axis squeezed
-                        into a phone is worse than no axis at all. */}
-                    <div className="space-y-3 lg:hidden">
-                      {roleGroups.map((g) => (
-                    <div key={g.roleId}>
-                      <div className="mb-1.5 flex items-baseline gap-2">
-                        <span
-                          className="h-2 w-2 shrink-0 rounded-full"
-                          style={{ backgroundColor: accentOf(roleColour(g.roleId)).dot }}
-                        />
-                        <span className="text-[13px] font-semibold text-ink">
-                          {roleName(g.roleId)}
-                        </span>
-                        <span className="nums text-[12px] text-ink-faint">
-                          {g.people} {g.people === 1 ? "person" : "people"}
-                        </span>
-                      </div>
-
-                      {/* Chips wrap, so this reads at any width with no
-                          horizontal scrollbar. */}
-                      <div className="flex flex-wrap gap-2">
-                        {g.slots.map((slot) => (
-                          <button
-                            key={slot.id}
-                            onClick={() => setSlotModal({ dow: d.dow, slot })}
-                            className="flex min-h-11 items-center gap-2 rounded-xl border border-line bg-surface px-3 py-1.5 text-left transition hover:border-ember hover:bg-ember-soft/40"
-                          >
-                            <span className="nums text-[13px] font-semibold text-ink">
-                              {formatTimeShort(hhmm(slot.start_time))}–
-                              {formatTimeShort(hhmm(slot.end_time))}
-                              {slot.crosses_midnight && (
-                                <span className="text-ink-faint" title="Finishes the next day">
-                                  {" "}
-                                  +1
-                                </span>
+            {/* Timetable grid */}
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[700px] border-collapse">
+                <thead>
+                  <tr>
+                    {DAYS.map((d) => {
+                      const t = tradingFor(d.dow);
+                      const closed = !t || !t.isOpen;
+                      const sum = daySummaryForRole(d.dow, effectiveRoleId);
+                      return (
+                        <th
+                          key={d.dow}
+                          className="border-b border-r border-line px-3 py-2.5 text-left last:border-r-0"
+                          style={{ width: "14.285%", minWidth: "110px" }}
+                        >
+                          <div className="flex items-start justify-between gap-1">
+                            <div>
+                              <div className="font-display text-sm font-semibold text-ink">
+                                {d.long}
+                              </div>
+                              <div className="nums mt-0.5 text-[11px] font-normal text-ink-soft">
+                                {closed
+                                  ? "Closed"
+                                  : t!.is24h
+                                    ? "24 hours"
+                                    : `${t!.opensAt}–${t!.closesAt}`}
+                              </div>
+                              {!closed && sum.count > 0 && (
+                                <div className="nums mt-0.5 text-[11px] font-normal text-ink-faint">
+                                  {sum.people} {sum.people === 1 ? "person" : "people"} &middot;{" "}
+                                  {formatHours(sum.hours)}
+                                </div>
                               )}
-                            </span>
-                            {slot.count > 1 && (
-                              <span className="nums text-[13px] font-bold text-ember">
-                                ×{slot.count}
-                              </span>
+                            </div>
+                            {!closed && sum.count > 0 && (
+                              <button
+                                onClick={() => setCopyModal({ dow: d.dow })}
+                                className="mt-0.5 rounded p-1 text-ink-faint transition hover:bg-surface hover:text-ember"
+                                title={`Copy ${d.long} to other days`}
+                              >
+                                <IconCopy width={12} height={12} />
+                              </button>
                             )}
-                            {slot.required_level && (
-                              <Badge tone="ember" className="!px-1.5 !py-0 !text-[9px]">
-                                {LEVEL_LABEL[slot.required_level]}
-                              </Badge>
-                            )}
-                            {slot.label && (
-                              <span className="max-w-28 truncate text-[12px] text-ink-faint">
-                                {slot.label}
-                              </span>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                      ))}
-                    </div>
-                  </>
-                )}
+                          </div>
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    {DAYS.map((d) => {
+                      const t = tradingFor(d.dow);
+                      const closed = !t || !t.isOpen;
+                      const dayRoleSlots = (
+                        slotsByDayAndRole.get(`${d.dow}:${effectiveRoleId}`) ?? []
+                      )
+                        .slice()
+                        .sort((a, b) =>
+                          hhmm(a.start_time).localeCompare(hhmm(b.start_time)),
+                        );
 
-                <button
-                  onClick={() => setSlotModal({ dow: d.dow })}
-                  className="flex min-h-11 items-center gap-1.5 rounded-xl border border-dashed border-line-strong px-3 text-[13px] font-medium text-ink-faint transition hover:border-ember hover:text-ember"
-                >
-                  <IconPlus width={15} height={15} /> Add a slot
-                </button>
-              </div>
-            </Card>
-          );
-        })}
+                      return (
+                        <td
+                          key={d.dow}
+                          className={`border-r border-line align-top last:border-r-0 ${
+                            closed ? "bg-surface-2/50" : ""
+                          }`}
+                          style={{ minWidth: "110px" }}
+                        >
+                          {closed ? (
+                            <div className="px-3 py-3 text-[12px] text-ink-faint/50">—</div>
+                          ) : (
+                            <div className="space-y-1.5 p-2">
+                              {dayRoleSlots.map((slot) => (
+                                <button
+                                  key={slot.id}
+                                  onClick={() => setSlotModal({ dow: d.dow, slot })}
+                                  className="w-full rounded-lg border border-line bg-surface px-2.5 py-2 text-left transition hover:border-ember hover:bg-ember-soft/30"
+                                >
+                                  <div className="nums text-[12px] font-semibold text-ink">
+                                    {formatTimeShort(hhmm(slot.start_time))}–
+                                    {formatTimeShort(hhmm(slot.end_time))}
+                                    {slot.crosses_midnight && (
+                                      <span className="text-ink-faint"> +1</span>
+                                    )}
+                                  </div>
+                                  {(slot.count > 1 || slot.required_level || slot.label) && (
+                                    <div className="mt-1 flex flex-wrap items-center gap-1">
+                                      {slot.count > 1 && (
+                                        <span className="nums text-[11px] font-bold text-ember">
+                                          ×{slot.count}
+                                        </span>
+                                      )}
+                                      {slot.required_level && (
+                                        <Badge tone="ember" className="!px-1 !py-0 !text-[9px]">
+                                          {LEVEL_LABEL[slot.required_level]}
+                                        </Badge>
+                                      )}
+                                      {slot.label && (
+                                        <span className="max-w-full truncate text-[10px] text-ink-faint">
+                                          {slot.label}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                </button>
+                              ))}
+                              <button
+                                onClick={() =>
+                                  setSlotModal({
+                                    dow: d.dow,
+                                    defaultRoleId: effectiveRoleId,
+                                  })
+                                }
+                                className="flex w-full min-h-9 items-center justify-center gap-1 rounded-lg border border-dashed border-line-strong text-[12px] text-ink-faint transition hover:border-ember hover:text-ember"
+                              >
+                                <IconPlus width={12} height={12} /> Add
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
       </div>
 
       <p className="mt-3 text-[12px] text-ink-faint">{COST_DISCLAIMER}</p>
@@ -595,6 +588,7 @@ export default function TemplatePage() {
         <SlotModal
           dow={slotModal.dow}
           slot={slotModal.slot}
+          defaultRoleId={slotModal.defaultRoleId}
           locationId={locationId}
           trading={tradingFor(slotModal.dow)}
           roles={activeRoles}
@@ -767,6 +761,7 @@ const LEVELS: Level[] = ["junior", "mid", "senior"];
 function SlotModal({
   dow,
   slot,
+  defaultRoleId,
   locationId,
   trading,
   roles,
@@ -778,6 +773,7 @@ function SlotModal({
 }: {
   dow: number;
   slot?: TemplateSlotRow;
+  defaultRoleId?: string;
   locationId: string;
   trading: TradingDay | null;
   roles: SlotModalRole[];
@@ -791,7 +787,7 @@ function SlotModal({
   const defStart = trading?.opensAt || "09:00";
   const defEnd = trading?.closesAt || "17:00";
 
-  const [roleId, setRoleId] = useState(slot?.role_id ?? roles[0]?.id ?? "");
+  const [roleId, setRoleId] = useState(slot?.role_id ?? defaultRoleId ?? roles[0]?.id ?? "");
   const [start, setStart] = useState(hhmm(slot?.start_time ?? defStart));
   const [end, setEnd] = useState(hhmm(slot?.end_time ?? defEnd));
   const [count, setCount] = useState(String(slot?.count ?? 1));
